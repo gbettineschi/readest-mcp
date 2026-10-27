@@ -19,26 +19,8 @@ Dependencies retain their own licenses and notices in the installed packages:
 
 ## Optional model
 
-[Xenova/multilingual-e5-small](https://huggingface.co/Xenova/multilingual-e5-small), commit `761b726dd34fb83930e26aab4e9ac3899aa1fa78`, is the quantized ONNX conversion of [intfloat/multilingual-e5-small](https://huggingface.co/intfloat/multilingual-e5-small). The model card declares MIT. Files are explicitly downloaded from Hugging Face, verified against `src/index/model.json`, and not included in this repository or package. Upstream work: [Microsoft E5](https://github.com/microsoft/unilm/tree/master/e5), [license](https://github.com/microsoft/unilm/blob/master/LICENSE).
+[Xenova/paraphrase-multilingual-MiniLM-L12-v2](https://huggingface.co/Xenova/paraphrase-multilingual-MiniLM-L12-v2), commit `2c4055b12046f11709e9df2c122e59ffbdc2f900`, is the quantized ONNX conversion of [sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2](https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2). Its model card declares Apache-2.0; see the [upstream license](https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2/blob/main/LICENSE). Files are explicitly downloaded from Hugging Face, verified against `src/index/model.json`, and not included in this repository or package.
 
-The MIT License (MIT)
+## Optional OCR
 
-Copyright (c) Microsoft Corporation
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+[Tesseract](https://github.com/tesseract-ocr/tesseract) and [tessdata language models](https://github.com/tesseract-ocr/tessdata_fast) are separately installed, Apache-2.0 licensed tools/data. They are not bundled or automatically downloaded by this server. PDF rendering uses PDF.js and its optional MIT-licensed [@napi-rs/canvas](https://github.com/Brooooooklyn/canvas) dependency, whose native packages retain their own notices.

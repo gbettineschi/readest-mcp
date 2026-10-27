@@ -55,7 +55,7 @@ it('chunks multilingual text within token budget, retaining every character and 
  const count=async(s:string)=>Array.from(s).length+2;
  const chunks=await chunkText(text,count);
  expect(chunks.length).toBeGreaterThan(1);expect(chunks.map(c=>text.slice(c.start,c.end)).join('')).toBe(text);
- for(const c of chunks){expect(await count('passage: '+text.slice(c.start,c.end))).toBeLessThanOrEqual(512);expect(text.slice(c.start,c.end)).not.toMatch(/^[\uDC00-\uDFFF]|[\uD800-\uDBFF]$/u);}
+ for(const c of chunks){expect(await count(text.slice(c.start,c.end))).toBeLessThanOrEqual(128);expect(text.slice(c.start,c.end)).not.toMatch(/^[\uDC00-\uDFFF]|[\uD800-\uDBFF]$/u);}
 });
 it('requires explicit valid model installation and never marks an interrupted download ready',async()=>{
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'readest-model-'));cleanups.push(()=>fs.rm(dir,{recursive:true,force:true}));const config={enabled:true,model_dir:dir};
