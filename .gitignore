@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+.superpowers/
+.env
+.env.*
+*.tgz
+.DS_Store
+.cache/
+credentials.json
