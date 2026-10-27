@@ -87,3 +87,13 @@ it('treats an all-blank PDF as available empty content without incomplete-covera
  expect(result.data?.book.availability.index).toBe('ready');expect(result.warnings).toEqual([]);expect(result.meta.coverage.completeness).toBe('complete');
  const page=result.data!.structure!.items[0]!,read=await f.handlers.read_content(inputSchemas.read_content.parse({selector:{kind:'structure',id:page.id}}));expect(read.data?.items).toEqual([]);expect(read.warnings).toEqual([]);
 });
+it('rejects an old page reference when on-demand preparation changes the extraction profile',async()=>{
+ const f=await fixture({pdf:true}),old=f.store.getContent(f.id)!.structure[0]!,refresh=createRefreshCoordinator({source:f.source,store:f.store,extractor:createDocumentExtractor({ocr:{enabled:true,command:'missing-tesseract',languages:['eng']}})}),handlers=createToolHandlers({source:f.source,store:f.store,refresh});
+ const result=await handlers.read_content(inputSchemas.read_content.parse({selector:{kind:'structure',id:old.id}}));
+ expect(result.error?.code).toBe('STALE_REFERENCE');expect(result.data).toBeNull();
+});
+it('flags cached text from obsolete extraction settings before serving search',async()=>{
+ const f=await fixture({pdf:true}),refresh=createRefreshCoordinator({source:f.source,store:f.store,extractor:createDocumentExtractor({ocr:{enabled:true,command:'missing-tesseract',languages:['eng']}})}),handlers=createToolHandlers({source:f.source,store:f.store,refresh});
+ const result=await handlers.search_library(inputSchemas.search_library.parse({query:'Known',targets:['book_text'],filters:{book_ids:[f.id]}}));
+ expect(result.warnings.map(w=>w.code)).toContain('EXTRACTION_STALE');expect(result.meta.from_cache).toBe(true);expect(result.meta.coverage.completeness).toBe('partial');expect(f.store.getBook(f.id)?.availability.index).toBe('pending');
+});

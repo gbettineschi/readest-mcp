@@ -113,7 +113,7 @@ PDF pages with embedded text are read directly. Pages with no drawing operations
 {"ocr":{"enabled":true,"command":"/absolute/path/to/tesseract","languages":["eng","ita"]}}
 ```
 
-OCR runs locally, without modifying the PDF or uploading page images. It requires the optional canvas dependency included by a normal `npm ci`. Recognized passages carry `text_origin: "ocr"` and an accuracy warning. Missing tools, language data and unrecognized pages retain explicit gaps. Changed settings invalidate the PDF extraction cache and its references. Per book, OCR is limited to 8 pages and a 30-second work budget inside the 60-second extraction worker; extensive scans should be OCR-processed separately. Only pages without embedded text are candidates, so this does not detect missing text within an otherwise text-bearing page.
+OCR runs locally, without modifying the PDF or uploading page images. It requires the optional canvas dependency included by a normal `npm ci`. Recognized passages carry `text_origin: "ocr"` and an accuracy warning. Missing tools, language data and unrecognized pages retain explicit gaps. Changed settings mark cached PDF extraction as stale on startup; search may use it with cache/incomplete-coverage warnings until refreshed. On-demand reads re-extract it and reject expired references. Native text is extracted first; optional rendering and recognition share a bounded deadline. Per book, OCR is limited to 8 pages and up to 30 seconds of the remaining 60-second extraction budget; extensive scans should be OCR-processed separately. Only pages without embedded text are candidates, so this does not detect missing text within an otherwise text-bearing page.
 
 ## Limits and verification
 
