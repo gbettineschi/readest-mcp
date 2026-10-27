@@ -112,9 +112,12 @@ export class IndexStore {
   hasEmbeddings(book_id:string,manifest:ModelManifest):boolean{const evidence=this.semanticEvidenceForBook(book_id);return evidence.every(p=>Boolean(this.db.prepare('SELECT 1 FROM vectors WHERE passage_id=? AND revision=? AND model=? LIMIT 1').get(p.passage_id,p.revision,this.modelKey(manifest))));}
   replaceEmbeddings(book_id:string,manifest:ModelManifest,chunks:EmbeddedChunk[]):void{
     this.transaction(()=>{if(!this.getBook(book_id))throw new DomainError('STALE_REFERENCE','Book is no longer available.');const model=this.modelKey(manifest);
-      for(const c of chunks){const p=this.getPassage(c.passage_id);if(!p||p.book_id!==book_id||c.vector.length!==manifest.dimensions||!c.vector.every(Number.isFinite)||!Number.isInteger(c.start)||!Number.isInteger(c.end)||c.start<0||c.end<=c.start||c.end>p.text.length||!c.vector.some(v=>v!==0))throw new DomainError('INDEX_UNAVAILABLE','Invalid embedding identity, range or vector.');}
+      const parents=new Map<string,{book_id:string;revision:string;length:number}>(),read=this.db.prepare('SELECT data FROM evidence WHERE id=?');
+      for(const c of chunks){let p=parents.get(c.passage_id);if(!p){const row=read.get(c.passage_id);if(row){const source=JSON.parse(String(row.data)) as Passage;p={book_id:source.book_id,revision:source.revision,length:source.text.length};parents.set(c.passage_id,p);}}
+        if(!p||p.book_id!==book_id||c.vector.length!==manifest.dimensions||!c.vector.every(Number.isFinite)||!Number.isInteger(c.start)||!Number.isInteger(c.end)||c.start<0||c.end<=c.start||c.end>p.length||!c.vector.some(v=>v!==0))throw new DomainError('INDEX_UNAVAILABLE','Invalid embedding identity, range or vector.');}
       this.db.prepare('DELETE FROM vectors WHERE book_id=? AND model=?').run(book_id,model);
-      for(const c of chunks){const p=this.getPassage(c.passage_id)!;this.db.prepare('INSERT INTO vectors(passage_id,book_id,revision,model,start,end,vector) VALUES (?,?,?,?,?,?,?)').run(c.passage_id,book_id,p.revision,model,c.start,c.end,Buffer.from(c.vector.buffer,c.vector.byteOffset,c.vector.byteLength));}this.bump();
+      const insert=this.db.prepare('INSERT INTO vectors(passage_id,book_id,revision,model,start,end,vector) VALUES (?,?,?,?,?,?,?)');
+      for(const c of chunks)insert.run(c.passage_id,book_id,parents.get(c.passage_id)!.revision,model,c.start,c.end,Buffer.from(c.vector.buffer,c.vector.byteOffset,c.vector.byteLength));this.bump();
     });
   }
   async search(input:Inputs['search_library'],semantic:QueryEmbedding|null):Promise<Outputs['search_library']>{
@@ -141,7 +144,7 @@ export class IndexStore {
       }
     }
     const conceptual=[...best.values()].sort((a,b)=>b.score-a.score||a.id.localeCompare(b.id));let ranked=used_mode==='semantic'?conceptual:lexical;
-    if(used_mode==='hybrid'){const fused=new Map<string,RankedHit>();for(const list of [lexical,conceptual])list.forEach((hit,i)=>{const old=fused.get(hit.id);fused.set(hit.id,{...hit,score:(old?.score??0)+1/(60+i+1)});});ranked=[...fused.values()].sort((a,b)=>b.score-a.score||a.id.localeCompare(b.id));}
+    if(used_mode==='hybrid'){const fused=new Map<string,RankedHit>();for(const list of [lexical,conceptual])list.forEach((hit,i)=>{const old=fused.get(hit.id);fused.set(hit.id,{...(old??hit),score:(old?.score??0)+1/(60+i+1)});});ranked=[...fused.values()].sort((a,b)=>b.score-a.score||a.id.localeCompare(b.id));}
     const items=ranked.slice(offset,offset+input.limit).map(hit=>{const p=this.getPassage(hit.id)!,end=p.retrieval_unit?hit.end??Math.min(p.text.length,hit.start+LIMITS.excerpt):p.text.length,excerptEnd=Math.min(end,hit.start+LIMITS.excerpt),id=p.retrieval_unit&&(hit.start>0||end<p.text.length)?p.passage_id+'~'+hit.start+'~'+end:p.passage_id;return {evidence:{...p,passage_id:id,text:p.text.slice(hit.start,excerptEnd),location:{...p.location,start:p.location.start+hit.start,end:p.location.start+excerptEnd}},score:hit.score};});
     return {items,next_cursor:ranked.length>offset+input.limit?writeCursor(this.generation(),key,offset+input.limit):null,requested_mode:input.mode,used_mode};
   }
