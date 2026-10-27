@@ -10,7 +10,7 @@ import {CredentialStore,createCloudAuth} from './cloud-auth.js';
 import {CloudClient} from './cloud-client.js';
 const ms=(v:unknown)=>typeof v==='number'?v:typeof v==='string'?(Date.parse(v)||0):0;
 const stamp=(r:Raw)=>Math.max(ms(r.updated_at??r.updatedAt),ms(r.deleted_at??r.deletedAt),ms(r.synced_at));
-const fields={books:['user_id','book_hash','meta_hash','title','author','format','tags','group_id','group_name','reading_status','progress','created_at','updated_at','deleted_at','synced_at'],configs:['user_id','book_hash','meta_hash','progress','location','updated_at','deleted_at'],notes:['user_id','book_hash','meta_hash','id','type','cfi','page','xpointer0','xpointer1','text','note','color','style','global','ink','created_at','updated_at','deleted_at']};
+const fields={books:['user_id','book_hash','meta_hash','title','author','format','tags','group_id','group_name','reading_status','progress','created_at','updated_at','deleted_at','synced_at','uploaded_at'],configs:['user_id','book_hash','meta_hash','progress','location','updated_at','deleted_at'],notes:['user_id','book_hash','meta_hash','id','type','cfi','page','xpointer0','xpointer1','text','note','color','style','global','ink','created_at','updated_at','deleted_at']};
 type Channel=keyof typeof fields;
 const selected=(r:Raw,c:Channel):Raw=>Object.fromEntries(fields[c].filter(k=>r[k]!==undefined).map(k=>[k,r[k]]));
 const decode=(value:unknown)=>{if(typeof value!=='string')return value;try{return JSON.parse(value);}catch{return undefined;}};
@@ -50,11 +50,11 @@ export async function createCloudSource(config:CloudConfig,credentials=new Crede
         for(const row of outcome.value){const key=String(c==='notes'?row.id:row.book_hash),old=map.get(key);if(!old||stamp(row)>=stamp(old))map.set(key,row);}
         checkpoint[c+'_records']=[...map.values()];checkpoint[c+'_cursor']=Math.max(Number(prior[c+'_cursor']??0),...outcome.value.map(r=>c==='books'?ms(r.synced_at)||stamp(r):stamp(r)));
       }
-      const books:Book[]=[];const notesOk=outcomes[2]?.status==='fulfilled'||Array.isArray(prior.notes_records);
+      const books:Book[]=[];const file_versions:Record<string,string|null>={};const notesOk=outcomes[2]?.status==='fulfilled'||Array.isArray(prior.notes_records);
       for(const raw of maps.books.values()){
         const id=scopedId('b',source_id,String(raw.book_hash));if(raw.deleted_at){deleted_book_ids.push(id);continue;}
         const cfg=maps.configs.get(String(raw.book_hash))??{};
-        const book=normalizeBook({hash:raw.book_hash,title:raw.title,author:raw.author,format:raw.format,tags:raw.tags,groupId:raw.group_id,groupName:raw.group_name,readingStatus:raw.reading_status,progress:raw.progress,createdAt:raw.created_at,updatedAt:raw.updated_at},{progress:decode(cfg.progress),location:cfg.location,booknotes:notesOk?[]:undefined},source_id);books.push(book);
+        const book=normalizeBook({hash:raw.book_hash,title:raw.title,author:raw.author,format:raw.format,tags:raw.tags,groupId:raw.group_id,groupName:raw.group_name,readingStatus:raw.reading_status,progress:raw.progress,createdAt:raw.created_at,updatedAt:raw.updated_at},{progress:decode(cfg.progress),location:cfg.location,booknotes:notesOk?[]:undefined},source_id);books.push(book);file_versions[book.id]=typeof raw.uploaded_at==='string'?raw.uploaded_at:null;
       }
       const annotations:SourceRead['annotations']=[];
       for(const row of maps.notes.values()){
@@ -62,7 +62,9 @@ export async function createCloudSource(config:CloudConfig,credentials=new Crede
         if(!note){warnings.push({code:'ANNOTATION_UNSUPPORTED',message:'A cloud annotation type could not be interpreted.'});continue;}
         if(row.deleted_at)deleted_annotation_ids.push(note.id);else annotations.push(note);
       }
-      return {source_id,kind:previous?'delta':'full',books,annotations,deleted_book_ids,deleted_annotation_ids,checkpoint,refreshed_at:new Date().toISOString(),coverage:{scope:'configured_source',completeness:warnings.length?'partial':'complete',known_books:books.length,covered_books:books.length},warnings};
+      const refreshed_at=outcomes.some(r=>r.status==='fulfilled')?new Date().toISOString():typeof prior.refreshed_at==='string'?prior.refreshed_at:null;
+      if(refreshed_at===null)throw new DomainError('SOURCE_UNAVAILABLE','No cloud channel could be refreshed.',true);checkpoint.refreshed_at=refreshed_at;
+      return {source_id,kind:previous?'delta':'full',books,annotations,deleted_book_ids,deleted_annotation_ids,checkpoint,refreshed_at,coverage:{scope:'configured_source',completeness:warnings.length?'partial':'complete',known_books:books.length,covered_books:books.length},warnings,file_versions};
     },
     async resolveBookFile(book,options):Promise<FileResolution>{
       try{await account();options.signal.throwIfAborted();if(!['EPUB','PDF'].includes(book.format))throw new DomainError('UNSUPPORTED_CONTENT','Only EPUB and PDF content is supported.');

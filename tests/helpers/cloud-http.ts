@@ -7,7 +7,7 @@ export const userId='00000000-0000-4000-8000-000000000001';
 export const jwt=(label='initial')=>Buffer.from(JSON.stringify({alg:'HS256',typ:'JWT'})).toString('base64url')+'.'+Buffer.from(JSON.stringify({sub:userId,exp:Math.floor(Date.now()/1000)+3600,role:'authenticated',label})).toString('base64url')+'.fixture';
 export async function cloudFixture(){
   const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'readest-cloud-')));
-  const state={requests:[] as {method:string;url:string;authorization:string|undefined}[],notesError:false,malformed:false,authOnce:false,deny:false,renewals:0,downloads:0,signedExpired:false,largePage:false,deleted:false,oversized:false,interrupted:false};
+  const state={requests:[] as {method:string;url:string;authorization:string|undefined}[],notesError:false,malformed:false,authOnce:false,deny:false,renewals:0,downloads:0,signedExpired:false,largePage:false,deleted:false,oversized:false,interrupted:false,bookBytes:Buffer.from('fixture book bytes') as Buffer};
   let origin='';
   const server=http.createServer(async(req,res)=>{
     const url=new URL(req.url!,origin);state.requests.push({method:req.method!,url:req.url!,authorization:req.headers.authorization});
@@ -34,7 +34,7 @@ export async function cloudFixture(){
     if(url.pathname==='/file.epub'){
       if(state.signedExpired){state.signedExpired=false;res.statusCode=403;return res.end('expired');}
       if(state.interrupted){res.setHeader('content-length','10000');res.write('partial');return res.destroy();}
-      res.setHeader('content-type','application/epub+zip');return res.end('fixture book bytes');
+      res.setHeader('content-type','application/epub+zip');return res.end(state.bookBytes);
     }
     send({error:'Unexpected endpoint'},404);
   });

@@ -42,7 +42,7 @@ describe('read-only cloud source',()=>{
     const f=await fixture(),s=await createCloudSource(f.config),r=await s.readSnapshot(null,signal());f.state.interrupted=true;
     expect(await s.resolveBookFile(r.books[0]!,{acquire:true,signal:signal()})).toMatchObject({status:'unavailable',code:'SOURCE_UNAVAILABLE'});
     expect(await fs.readdir(path.join(f.config.cache_dir,s.source_id,'files')).catch(()=>[])).toEqual([]);
-    f.state.oversized=true;const cached=await s.readSnapshot(r.checkpoint,signal());expect(cached.coverage.completeness).toBe('partial');expect(cached.checkpoint).toEqual(r.checkpoint);expect(cached.warnings.some(w=>w.code==='USING_CACHE')).toBe(true);
+    f.state.oversized=true;const cached=await s.readSnapshot(r.checkpoint,signal());expect(cached.coverage.completeness).toBe('partial');expect(cached.checkpoint).toEqual(r.checkpoint);expect(cached.warnings.some(w=>w.code==='USING_CACHE')).toBe(true);expect(cached.refreshed_at).toBe(r.refreshed_at);
     await expect(s.readSnapshot(null,signal())).rejects.toMatchObject({code:'LIMIT_EXCEEDED'});
   });
   it('requires a reconnect after changing accounts instead of mixing cached identities',async()=>{

@@ -18,7 +18,7 @@ export const inputSchemas={
 };
 const page=<T extends z.ZodType>(item:T)=>z.object({items:z.array(item),next_cursor:z.string().nullable()});
 export const dataSchemas={
-  library_status:z.object({known_books:z.number().int(),annotations_available:z.number().int(),text_indexed:z.number().int(),formats:z.record(z.string(),z.number().int()),capabilities:z.object({semantic:z.boolean()}),last_refresh_error:z.string().nullable()}),
+  library_status:z.object({known_books:z.number().int(),annotations_available:z.number().int(),text_indexed:z.number().int(),extraction_failed:z.number().int(),unavailable_files:z.number().int(),unindexed_books:z.number().int(),formats:z.record(z.string(),z.number().int()),capabilities:z.object({semantic:z.boolean()}),last_refresh_error:z.string().nullable()}),
   list_books:page(BookSchema),
   get_book:z.object({book:BookSchema,structure:page(StructureSchema).nullable()}),
   list_annotations:page(AnnotationSchema),

@@ -23,17 +23,17 @@ export function createLocalSource(config:LocalConfig):LibrarySource{
     async readSnapshot(_previous,signal):Promise<SourceRead>{
       signal.throwIfAborted();let saved:unknown;try{saved=await readStableJson(await resolveAllowedPath(path.join(root,'library.json'),[root]));}catch{throw new DomainError('SOURCE_UNAVAILABLE','Saved Readest library is missing, changing or unreadable.',true);}
       if(!Array.isArray(saved))throw new DomainError('SOURCE_UNAVAILABLE','Saved Readest catalogue has an unsupported format.');
-      const books:Book[]=[],annotations:SourceRead['annotations']=[],deleted_book_ids:string[]=[],deleted_annotation_ids:string[]=[],warnings:Warning[]=[];const next=new Map<string,Raw>();let invalid=false;
+      const books:Book[]=[],annotations:SourceRead['annotations']=[],deleted_book_ids:string[]=[],deleted_annotation_ids:string[]=[],warnings:Warning[]=[];const file_versions:Record<string,string|null>={};const next=new Map<string,Raw>();let invalid=false;
       for(const value of saved){signal.throwIfAborted();const raw=record(value);if(typeof raw.hash!=='string'||!/^[A-Za-z0-9_-]{1,256}$/.test(raw.hash)){invalid=true;warnings.push({code:'INVALID_RECORD',message:'A catalogue entry could not be identified.'});continue;}
         const book_id=scopedId('b',source_id,raw.hash);if(raw.deletedAt){deleted_book_ids.push(book_id);continue;}
         let conf:Raw={};try{conf=record(await readStableJson(await resolveAllowedPath(path.join(root,raw.hash,'config.json'),[root])));}catch{warnings.push({code:'ANNOTATIONS_UNAVAILABLE',message:'Saved annotation data is unavailable for a book.'});}
         const book=normalizeBook(raw,conf,source_id);next.set(book.id,raw);
-        try{await contentPath(raw);book.availability.file='available';}catch{book.availability.file='unavailable';}
+        try{const stat=await fs.stat(await contentPath(raw));book.availability.file='available';file_versions[book.id]=[stat.dev,stat.ino,stat.size,stat.mtimeMs].join(':');}catch{book.availability.file='unavailable';file_versions[book.id]=null;}
         for(const note of savedNotes(conf)){const normalized=normalizeAnnotation(note,book.id,source_id);if(!normalized){warnings.push({code:'ANNOTATION_UNSUPPORTED',message:'An annotation record could not be interpreted.'});continue;}if(note.deletedAt)deleted_annotation_ids.push(normalized.id);else annotations.push(normalized);}
         books.push(book);
       }
       if(invalid&&books.length===0&&saved.length>0)throw new DomainError('SOURCE_UNAVAILABLE','No saved catalogue entries could be interpreted.');
-      records=next;return {source_id,kind:invalid?'delta':'full',books,annotations,deleted_book_ids,deleted_annotation_ids,checkpoint:{version:1},refreshed_at:new Date().toISOString(),coverage:{scope:'configured_source',completeness:invalid?'partial':'complete',known_books:books.length,covered_books:books.length},warnings};
+      records=next;return {source_id,kind:invalid?'delta':'full',books,annotations,deleted_book_ids,deleted_annotation_ids,checkpoint:{version:1},refreshed_at:new Date().toISOString(),coverage:{scope:'configured_source',completeness:invalid?'partial':'complete',known_books:books.length,covered_books:books.length},warnings,file_versions};
     },
     async resolveBookFile(book,options):Promise<FileResolution>{
       try{options.signal.throwIfAborted();const raw=records.get(book.id);if(!raw)throw new DomainError('CONTENT_UNAVAILABLE','Refresh the saved catalogue before reading this book.');
