@@ -11,3 +11,7 @@ This file records evidence, not a general compatibility guarantee. Live-account 
 - URL acquisition uses the read endpoint's book-hash/extension fallback; account authorization is not forwarded to storage downloads. Cloud availability and account eligibility still require a real authorized probe.
 
 Sources: [sync documentation](https://www.readest.com/docs/sync), [sync server](https://github.com/readest/readest/blob/44c90152f6b04e74f71245bb3642d9a7e03042ed/apps/readest-app/src/pages/api/sync.ts), [download endpoint](https://github.com/readest/readest/blob/44c90152f6b04e74f71245bb3642d9a7e03042ed/apps/readest-app/src/pages/api/storage/download.ts), [KOReader authentication](https://github.com/readest/readest/blob/44c90152f6b04e74f71245bb3642d9a7e03042ed/apps/readest.koplugin/readest_supabaseauth.lua).
+# Local semantic retrieval probe
+
+On this arm64 Mac with Node 24.22.1, Transformers.js 4.3.1 and the pinned q8 multilingual E5-small model, the opt-in offline CPU test retrieved all six predetermined English/Italian paraphrases within the top three of eight synthetic passages. Vectors were finite, 384-dimensional and normalized. One warm-filesystem run took 1.15 seconds including model initialization, with process peak RSS 689.75 MiB (the test runner is included). This is a small corpus/host measurement, not a library-scale performance claim. Model files total about 140 MB and are explicitly downloaded, checksum-verified and kept outside the repository.
+

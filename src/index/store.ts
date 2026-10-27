@@ -65,7 +65,7 @@ export class IndexStore {
         if(JSON.stringify(old)!==JSON.stringify(book))dirty=true;
         this.db.prepare('INSERT INTO books(id,data) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data').run(book.id,JSON.stringify(book));
         if(book.availability.annotations==='available'){
-          const previous=this.db.prepare('SELECT data FROM annotations WHERE book_id=? ORDER BY id').all().map(r=>String(r.data));const current=notes.filter(n=>n.book_id===book.id).sort((a,b)=>a.id.localeCompare(b.id));
+          const previous=this.db.prepare('SELECT data FROM annotations WHERE book_id=? ORDER BY id').all(book.id).map(r=>String(r.data));const current=notes.filter(n=>n.book_id===book.id).sort((a,b)=>a.id.localeCompare(b.id));
           if(JSON.stringify(previous)!==JSON.stringify(current.map(n=>JSON.stringify(n)))){dirty=true;this.db.prepare('DELETE FROM annotations WHERE book_id=?').run(book.id);for(const note of current)this.db.prepare('INSERT INTO annotations(id,book_id,data) VALUES (?,?,?)').run(note.id,book.id,JSON.stringify(note));this.indexAnnotations(book);}
         }else if(this.db.prepare('SELECT 1 FROM annotations WHERE book_id=? LIMIT 1').get(book.id)){warnings.push({code:'USING_CACHE',message:'Previously saved annotations are being used for a book whose config is unavailable.'});}
       }
@@ -90,14 +90,35 @@ export class IndexStore {
     return this.paginate(notes,input.limit,input.cursor,cursorKey({...input,cursor:null,kind:'annotations'}));
   }
   getStructure(book_id:string,input:{limit:number;cursor:string|null}):Page<StructureItem>{return this.paginate(this.getContent(book_id)?.structure??[],input.limit,input.cursor,cursorKey({kind:'structure',book_id,limit:input.limit}));}
-  async search(input:Inputs['search_library'],_semantic:QueryEmbedding|null):Promise<Outputs['search_library']>{
-    if(input.mode==='semantic')throw new DomainError('CAPABILITY_UNAVAILABLE','Local semantic search is not configured.');
+  evidenceForBook(book_id:string):Passage[]{return this.db.prepare('SELECT data FROM evidence WHERE book_id=? ORDER BY id').all(book_id).map(r=>JSON.parse(String(r.data)) as Passage);}
+  private modelKey(m:ModelManifest):string{return hash(JSON.stringify([m.id,m.revision,m.dtype,m.dimensions,m.chunk_version]));}
+  hasEmbeddings(book_id:string,manifest:ModelManifest):boolean{const evidence=this.evidenceForBook(book_id);return evidence.every(p=>Boolean(this.db.prepare('SELECT 1 FROM vectors WHERE passage_id=? AND revision=? AND model=? LIMIT 1').get(p.passage_id,p.revision,this.modelKey(manifest))));}
+  replaceEmbeddings(book_id:string,manifest:ModelManifest,chunks:EmbeddedChunk[]):void{
+    this.transaction(()=>{if(!this.getBook(book_id))throw new DomainError('STALE_REFERENCE','Book is no longer available.');const model=this.modelKey(manifest);
+      for(const c of chunks){const p=this.getPassage(c.passage_id);if(!p||p.book_id!==book_id||c.vector.length!==manifest.dimensions||!c.vector.every(Number.isFinite)||!Number.isInteger(c.start)||!Number.isInteger(c.end)||c.start<0||c.end<=c.start||c.end>p.text.length||!c.vector.some(v=>v!==0))throw new DomainError('INDEX_UNAVAILABLE','Invalid embedding identity, range or vector.');}
+      this.db.prepare('DELETE FROM vectors WHERE book_id=? AND model=?').run(book_id,model);
+      for(const c of chunks){const p=this.getPassage(c.passage_id)!;this.db.prepare('INSERT INTO vectors(passage_id,book_id,revision,model,start,end,vector) VALUES (?,?,?,?,?,?,?)').run(c.passage_id,book_id,p.revision,model,c.start,c.end,Buffer.from(c.vector.buffer,c.vector.byteOffset,c.vector.byteLength));}this.bump();
+    });
+  }
+  async search(input:Inputs['search_library'],semantic:QueryEmbedding|null):Promise<Outputs['search_library']>{
+    if(input.mode==='semantic'&&!semantic)throw new DomainError('CAPABILITY_UNAVAILABLE','Local semantic search is not configured.');
     const query=keywordQuery(input.query),books=new Map(this.allBooks().filter(b=>matchesBook(b,input.filters)).map(b=>[b.id,b]));const targets=input.targets.map(t=>t==='quotes'?'quote':t==='notes'?'note':'book_text');
-    const key=cursorKey({...input,cursor:null,kind:'search'}),offset=readCursor(input.cursor,this.generation(),key);const items:Outputs['search_library']['items']=[];
-    if(query&&books.size){const rows=this.db.prepare('SELECT e.data,bm25(search_fts) AS rank FROM search_fts JOIN evidence e ON e.id=search_fts.id WHERE search_fts MATCH ? AND e.book_id IN (SELECT value FROM json_each(?)) AND e.source_kind IN (SELECT value FROM json_each(?)) ORDER BY rank,e.id').iterate(query,JSON.stringify([...books.keys()]),JSON.stringify(targets));
-      let skipped=0;for(const row of rows){if(skipped++<offset)continue;const p=JSON.parse(String(row.data)) as Passage,book=books.get(p.book_id)!;const term=input.query.match(/[\p{L}\p{N}_]+/u)?.[0]??'';const at=Math.max(0,p.text.toLocaleLowerCase().indexOf(term.toLocaleLowerCase())-80);items.push({evidence:{...p,title:book.title,author:book.author,text:p.text.slice(at,at+LIMITS.excerpt)},score:-Number(row.rank)});if(items.length>input.limit)break;}
+    const used_mode=input.mode==='hybrid'&&!semantic?'keyword':input.mode;
+    const key=cursorKey({...input,cursor:null,kind:'search',model:semantic?this.modelKey(semantic.manifest):null}),offset=readCursor(input.cursor,this.generation(),key);
+    const lexical:{id:string;score:number;start:number}[]=[];
+    if(used_mode!=='semantic'&&query&&books.size){const rows=this.db.prepare('SELECT e.id,e.data,bm25(search_fts) AS rank FROM search_fts JOIN evidence e ON e.id=search_fts.id WHERE search_fts MATCH ? AND e.book_id IN (SELECT value FROM json_each(?)) AND e.source_kind IN (SELECT value FROM json_each(?)) ORDER BY rank,e.id').iterate(query,JSON.stringify([...books.keys()]),JSON.stringify(targets));
+      for(const row of rows){const p=JSON.parse(String(row.data)) as Passage,term=input.query.match(/[\p{L}\p{N}_]+/u)?.[0]??'';lexical.push({id:String(row.id),score:-Number(row.rank),start:Math.max(0,p.text.toLocaleLowerCase().indexOf(term.toLocaleLowerCase())-80)});}
     }
-    return {items:items.slice(0,input.limit),next_cursor:items.length>input.limit?writeCursor(this.generation(),key,offset+input.limit):null,requested_mode:input.mode,used_mode:'keyword'};
+    const best=new Map<string,{id:string;score:number;start:number}>();
+    if(used_mode!=='keyword'&&semantic){const q=semantic.vector,norm=Math.hypot(...q);if(q.length!==semantic.manifest.dimensions||!q.every(Number.isFinite)||!norm)throw new DomainError('CAPABILITY_UNAVAILABLE','Query embedding is invalid.');
+      for(const row of this.db.prepare('SELECT v.*,e.source_kind FROM vectors v JOIN evidence e ON e.id=v.passage_id WHERE v.model=? AND v.book_id IN (SELECT value FROM json_each(?)) AND e.source_kind IN (SELECT value FROM json_each(?))').iterate(this.modelKey(semantic.manifest),JSON.stringify([...books.keys()]),JSON.stringify(targets))){
+        const bytes=row.vector as Uint8Array,copy=Uint8Array.from(bytes),v=new Float32Array(copy.buffer);if(v.length!==q.length)continue;let dot=0,n=0;for(let i=0;i<q.length;i++){dot+=q[i]!*v[i]!;n+=v[i]!**2;}const score=dot/(norm*Math.sqrt(n)),id=String(row.passage_id);if(Number.isFinite(score)&&(!best.has(id)||score>best.get(id)!.score))best.set(id,{id,score,start:Number(row.start)});
+      }
+    }
+    const conceptual=[...best.values()].sort((a,b)=>b.score-a.score||a.id.localeCompare(b.id));let ranked=used_mode==='semantic'?conceptual:lexical;
+    if(used_mode==='hybrid'){const fused=new Map<string,{id:string;score:number;start:number}>();for(const list of [lexical,conceptual])list.forEach((hit,i)=>{const old=fused.get(hit.id);fused.set(hit.id,{...hit,score:(old?.score??0)+1/(60+i+1)});});ranked=[...fused.values()].sort((a,b)=>b.score-a.score||a.id.localeCompare(b.id));}
+    const items=ranked.slice(offset,offset+input.limit).map(hit=>{const p=this.getPassage(hit.id)!;return {evidence:{...p,text:p.text.slice(hit.start,hit.start+LIMITS.excerpt),location:{...p.location,start:p.location.start+hit.start,end:Math.min(p.location.end,p.location.start+hit.start+LIMITS.excerpt)}},score:hit.score};});
+    return {items,next_cursor:ranked.length>offset+input.limit?writeCursor(this.generation(),key,offset+input.limit):null,requested_mode:input.mode,used_mode};
   }
   status():Outputs['library_status']{const books=this.allBooks();const formats:Record<string,number>={};for(const b of books)formats[b.format]=(formats[b.format]??0)+1;const indexed=books.filter(b=>b.availability.index==='ready').length;return {known_books:books.length,annotations_available:books.filter(b=>b.availability.annotations==='available').length,text_indexed:indexed,extraction_failed:books.filter(b=>b.availability.index==='failed').length,unavailable_files:books.filter(b=>b.availability.file==='unavailable').length,unindexed_books:books.length-indexed,formats,capabilities:{semantic:false},last_refresh_error:this.lastError()};}
   coverage(targets:string[]=['book_text','quotes','notes']):Meta['coverage']{const books=this.allBooks();const covered=books.filter(b=>(!targets.includes('book_text')||b.availability.index==='ready')&&(!targets.some(t=>t==='quotes'||t==='notes')||b.availability.annotations==='available')).length;return {scope:'configured_source',known_books:books.length,covered_books:covered,completeness:this.warnings().length||covered<books.length?'partial':this.hasSnapshot()?'complete':'unknown'};}

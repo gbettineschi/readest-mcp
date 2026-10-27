@@ -23,6 +23,6 @@ export interface Page<T> {items:T[];next_cursor:string|null;}
 export interface ModelManifest {id:string;revision:string;dtype:string;dimensions:number;chunk_version:number;}
 export interface EmbeddedChunk {passage_id:string;start:number;end:number;vector:Float32Array;}
 export interface QueryEmbedding {vector:Float32Array;manifest:ModelManifest;}
-export interface Embedder {manifest:ModelManifest;embed(texts:string[],kind:'query'|'passage'):Promise<Float32Array[]>;}
+export interface Embedder {manifest:ModelManifest;countTokens(text:string):Promise<number>;embed(texts:string[],kind:'query'|'passage'):Promise<Float32Array[]>;close?():Promise<void>;}
 export interface EvidenceReference {passage_id:string;revision:string;}
 export const blankLocation=(kind:Location['kind']):Location=>({kind,chapter:null,href:null,spine_index:null,paragraph:null,page:null,page_label:null,start:0,end:0,cfi:null});
