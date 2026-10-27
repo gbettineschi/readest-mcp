@@ -1,0 +1,40 @@
+{
+  "name": "readest-mcp",
+  "version": "0.1.0-dev.0",
+  "description": "Read-only MCP for Readest books, annotations and source references.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Gabriele Bettineschi",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gbettineschi/readest-mcp.git"
+  },
+  "engines": {
+    "node": ">=24.15.0 <25"
+  },
+  "bin": {
+    "readest-mcp": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "examples"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.4.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "2.4.0",
+    "@types/node": "24.19.2",
+    "typescript": "7.0.2",
+    "vitest": "5.0.5"
+  }
+}
