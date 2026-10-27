@@ -25,6 +25,7 @@
   "scripts": {
     "test": "vitest run",
     "pretest": "npm run build",
+    "pretypecheck": "npm run build",
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json"
   },

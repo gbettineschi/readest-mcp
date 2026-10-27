@@ -66,3 +66,10 @@ it('accepts bounded continuation beyond one million source characters',async()=>
  const refresh={metadata:async()=>({refreshed_at:f.store.refreshedAt(),indexed:0,warnings:[]}),refresh:f.refresh.refresh,prepare:async()=>content};const handlers=createToolHandlers({source:f.source,store:f.store,refresh});const args={selector:{kind:'structure',id:'long-structure'},max_chars:12000};const first=await handlers.read_content(inputSchemas.read_content.parse(args));const cursor=JSON.parse(Buffer.from(first.data!.next_cursor!,'base64url').toString());cursor.o=1008000;
  const continued=await handlers.read_content(inputSchemas.read_content.parse({...args,cursor:Buffer.from(JSON.stringify(cursor)).toString('base64url')}));expect(continued.error).toBeNull();expect(continued.data!.items[0]!.location.start).toBe(1008000);
 });
+it('never serves a prior account cache after credentials change, even within the metadata reuse window',async()=>{
+ const f=await cloudFixture();cleanups.push(f.close);const source=await createCloudSource(f.config),store=openIndex(f.config,source.source_id);cleanups.push(async()=>store.close());const refresh=createRefreshCoordinator({source,store,extractor:createDocumentExtractor()}),handlers=createToolHandlers({source,store,refresh});
+ expect((await handlers.list_books(inputSchemas.list_books.parse({}))).data?.items.length).toBe(1);
+ await fs.writeFile(f.config.credential_file,JSON.stringify({...f.session,user_id:'00000000-0000-4000-8000-000000000099'}),{mode:0o600});
+ const result=await handlers.list_books(inputSchemas.list_books.parse({}));expect(result.data).toBeNull();expect(result.error?.code).toBe('ACCOUNT_CHANGED');
+ await expect(refresh.metadata(signal())).rejects.toMatchObject({code:'ACCOUNT_CHANGED'});
+});

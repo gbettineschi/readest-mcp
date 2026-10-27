@@ -10,7 +10,7 @@ export function createRefreshCoordinator(deps:{source:LibrarySource;store:IndexS
   async function vectors(book_id:string,signal:AbortSignal){if(deps.embedder&&!store.hasEmbeddings(book_id,deps.embedder.manifest)){const chunks=await embedPassages(deps.embedder,store.evidenceForBook(book_id),signal);signal.throwIfAborted();store.replaceEmbeddings(book_id,deps.embedder.manifest,chunks);}}
   async function metadata(signal:AbortSignal,rebuild=false):Promise<RefreshReport>{
     try{const read=await source.readSnapshot(rebuild?null:store.getCheckpoint(),signal);signal.throwIfAborted();store.applySourceRead(read);return {refreshed_at:read.refreshed_at,indexed:0,warnings:store.warnings()};}
-    catch(error){const failure=asError(error);if(!store.hasSnapshot())throw failure;store.recordRefreshFailure(failure);return {refreshed_at:store.refreshedAt(),indexed:0,warnings:store.warnings()};}
+    catch(error){const failure=asError(error);if(failure.code==='ACCOUNT_CHANGED'||!store.hasSnapshot())throw failure;store.recordRefreshFailure(failure);return {refreshed_at:store.refreshedAt(),indexed:0,warnings:store.warnings()};}
   }
   async function prepare(book:Book,acquire:boolean,signal:AbortSignal):Promise<ExtractedBook>{
     const current=store.getBook(book.id);if(!current)throw new DomainError('CONTENT_UNAVAILABLE','Book is no longer in the catalogue.');

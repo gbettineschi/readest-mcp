@@ -18,7 +18,7 @@ export async function createCloudSource(config:CloudConfig,credentials=new Crede
   const initial=await credentials.load(),user=initial?.user_id??null;
   const source_id='cloud_'+hash(config.api_base+'\0'+(user??config.credential_file)).slice(0,24);
   const auth=createCloudAuth(config,credentials),client=new CloudClient(config,auth);
-  const account=async()=>{const current=await credentials.load();if(!current)throw new DomainError('AUTH_REQUIRED','Sign in with readest-mcp login.');if(current.user_id!==user)throw new DomainError('ACCOUNT_CHANGED','Restart the MCP after changing the signed-in account.');};
+  const account=async()=>{const current=await credentials.load();if(!current)throw new DomainError('AUTH_REQUIRED','Sign in with readest-mcp login.');if(current.user_id!==user)throw new DomainError('ACCOUNT_CHANGED','Restart the MCP after changing the signed-in account.');if(current.api_base!==config.api_base||current.auth_url!==config.auth_url)throw new DomainError('AUTH_REQUIRED','Session belongs to another cloud configuration. Sign in again.');};
   async function pull(channel:Channel,since:number,signal:AbortSignal):Promise<Raw[]>{
     const rows:Raw[]=[];let cursor=since;
     for(let pages=0;pages<10000;pages++){
@@ -33,7 +33,7 @@ export async function createCloudSource(config:CloudConfig,credentials=new Crede
     }
     throw new DomainError('LIMIT_EXCEEDED','Cloud library exceeds the supported paging limit.');
   }
-  return {mode:'cloud',source_id,
+  return {mode:'cloud',source_id,validateAccess:account,
     async readSnapshot(previous,signal):Promise<SourceRead>{
       await account();signal.throwIfAborted();if(previous?.source_id&&previous.source_id!==source_id)throw new DomainError('ACCOUNT_CHANGED','Cached source identity does not match this account.');
       const prior=previous??{version:1};const channels:Channel[]=['books','configs','notes'];
