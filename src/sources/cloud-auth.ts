@@ -6,6 +6,7 @@ import * as z from 'zod/v4';
 import type {CloudConfig} from '../config.js';
 import {DomainError} from '../domain/result.js';
 import {LIMITS} from '../limits.js';
+import {withFileLock} from '../security/lock.js';
 const sessionSchema=z.object({user_id:z.string().min(1),access_token:z.string().min(1),refresh_token:z.string().min(1),expires_at:z.number(),api_base:z.string(),auth_url:z.string()});
 export type StoredSession=z.infer<typeof sessionSchema>;
 export class CredentialStore {
@@ -21,14 +22,7 @@ export class CredentialStore {
   }
   async clear():Promise<void>{await fs.rm(this.file,{force:true});}
   async locked<T>(run:()=>Promise<T>):Promise<T>{
-    await fs.mkdir(path.dirname(this.file),{recursive:true,mode:0o700});const lock=this.file+'.lock';const deadline=Date.now()+LIMITS.requestMs;
-    for(;;){
-      let handle;try{handle=await fs.open(lock,'wx',0o600);}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;}
-      if(handle){try{await handle.writeFile(String(process.pid));return await run();}finally{await handle.close();await fs.rm(lock,{force:true});}}
-      try{const pid=Number(await fs.readFile(lock,'utf8'));if(Number.isInteger(pid)&&pid>0){try{process.kill(pid,0);}catch(e){if((e as NodeJS.ErrnoException).code==='ESRCH'){await fs.rm(lock,{force:true});continue;}}}}catch{/* Owner may have released the lock. */}
-      if(Date.now()>deadline)throw new DomainError('AUTH_REQUIRED','Cloud session renewal is busy. Retry shortly.',true);
-      await new Promise(resolve=>setTimeout(resolve,25));
-    }
+    return withFileLock(this.file+'.lock',run,new DomainError('AUTH_REQUIRED','Cloud session renewal is busy. Retry shortly.',true));
   }
 }
 export function createCloudAuth(config:CloudConfig,store=new CredentialStore(config.credential_file)){
