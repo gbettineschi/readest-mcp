@@ -17,7 +17,7 @@ npm ci
 npm run build
 ```
 
-To use keyword search without the optional local embedding runtime, install with `npm ci --omit=optional`. No npm release or binary installer is published yet.
+To use keyword search without the optional local embedding runtime, install with `npm ci --omit=optional`. [GitHub releases](https://github.com/gbettineschi/readest-mcp/releases) also provide a compiled npm package (`.tgz`) and SHA-256 checksums. Install a downloaded package with `npm install ./readest-mcp-0.1.0.tgz`, then use `npx readest-mcp` in that directory. Node 24 and runtime dependencies are still required; model files and Tesseract are installed separately. No npm registry package or standalone binary installer is published.
 
 ## Configure
 
@@ -61,7 +61,7 @@ node dist/cli.js doctor
 node dist/cli.js refresh --content available
 ```
 
-`refresh --content all` also acquires cloud books where available. `--rebuild` rebuilds generated search data. Neither edits your Readest library. Startup refreshes metadata, not every book's contents; explicit refresh builds the searchable corpus. Reading one book can prepare it on demand.
+`refresh --content all` also acquires cloud books where available. `--rebuild` re-extracts available files and rebuilds generated search data, including retrying OCR after installing missing language data. Neither edits your Readest library. Startup refreshes metadata, not every book's contents; explicit refresh builds the searchable corpus. Reading one book can prepare it on demand.
 
 For Codex, add this to `~/.codex/config.toml`, using absolute paths:
 
@@ -103,11 +103,21 @@ node dist/cli.js models fetch
 node dist/cli.js refresh --content available
 ```
 
-This explicitly downloads about 140 MB of pinned, checksum-verified multilingual E5-small model files. Inference runs locally on CPU; book text is not uploaded to an embedding service. Long passages are split within the tokenizer budget with source offsets preserved. Hybrid combines keyword and vector ranks. If semantics is unavailable, semantic requests fail clearly and hybrid reports a keyword fallback.
+This explicitly downloads about 135 MB of pinned, checksum-verified [multilingual MiniLM](https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2) model files. Inference runs locally on CPU; book text is not uploaded to an embedding service. For semantics, adjacent EPUB paragraphs in the same section form continuous documents, so headings have surrounding context. These are split within the model's 128-token budget; keep queries concise. Search returns a retrievable reference to the matching window with source offsets. Original paragraphs remain available to keyword search and reading; PDF pages and annotations stay separate. Hybrid fuses the two channels at the section identity. If semantics is unavailable, semantic requests fail clearly and hybrid reports a keyword fallback. After a model/index update, run `models fetch` and `refresh` again; old vectors are isolated by manifest identity.
+
+## Optional PDF OCR
+
+PDF pages with embedded text are read directly. Pages with no drawing operations are treated as blank. For image-only pages, optionally install [Tesseract](https://tesseract-ocr.github.io/tessdoc/Installation.html) and the language data you need, then add:
+
+```json
+{"ocr":{"enabled":true,"command":"/absolute/path/to/tesseract","languages":["eng","ita"]}}
+```
+
+OCR runs locally, without modifying the PDF or uploading page images. It requires the optional canvas dependency included by a normal `npm ci`. Recognized passages carry `text_origin: "ocr"` and an accuracy warning. Missing tools, language data and unrecognized pages retain explicit gaps. Changed settings mark cached PDF extraction as stale on startup; search may use it with cache/incomplete-coverage warnings until refreshed. On-demand reads re-extract it and reject expired references. Native text is extracted first; optional rendering and recognition share a bounded deadline. Per book, OCR is limited to 8 pages and up to 30 seconds of the remaining 60-second extraction budget; extensive scans should be OCR-processed separately. Only pages without embedded text are candidates, so this does not detect missing text within an otherwise text-bearing page.
 
 ## Limits and verification
 
-EPUB 2/3 and text-bearing PDFs are supported. Scans need OCR elsewhere; encrypted PDFs, extraction gaps and missing files are reported. PDF layout extraction is imperfect. Original annotation locators are preserved; quote context may be ambiguous or unresolved. Ink strokes are retained where available, without handwriting recognition. Large annotation payloads may be explicitly truncated.
+EPUB 2/3 and text-bearing PDFs are supported, with bounded optional OCR as above. Encrypted PDFs, extraction gaps and missing files are reported. PDF layout extraction is imperfect. Original annotation locators are preserved; quote context may be ambiguous or unresolved. Ink strokes are retained where available, without handwriting recognition. Large annotation payloads may be explicitly truncated.
 
 Pages default to 20 items (maximum 50); excerpts to 320 characters; content to 4,000 (maximum 12,000, with continuation). Responses are bounded at 64 KiB. Files are limited to 256 MiB, expanded EPUBs to 512 MiB/20,000 entries, extraction to 60 seconds.
 
@@ -117,6 +127,7 @@ Synthetic local/cloud tests exercise all six tools through real MCP processes, p
 npm run typecheck
 npm test
 READEST_TEST_MODEL=1 npm test -- tests/semantic-model.test.ts
+READEST_TEST_OCR=1 npm test -- tests/content.test.ts
 # Opt in only with your private source configured:
 READEST_TEST_LIVE=1 npm test -- tests/live.test.ts
 ```

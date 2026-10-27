@@ -31,7 +31,7 @@ async function main(){
  }
  const source=config.source==='local'?createLocalSource(config):await createCloudSource(config),store=openIndex(config,source.source_id);let embedder:Embedder|null=null;
  try{if(config.embeddings.enabled)try{embedder=await createLocalEmbedder(config.embeddings);}catch{/* Availability is reported through tool results. */}
-  const refresh=createRefreshCoordinator({source,store,extractor:createDocumentExtractor(),embedder}),handlers=createToolHandlers({source,store,refresh,embedder});
+  const refresh=createRefreshCoordinator({source,store,extractor:createDocumentExtractor({ocr:config.ocr}),embedder}),handlers=createToolHandlers({source,store,refresh,embedder});
   if(command==='refresh'){if(values.content&&!['available','all'].includes(values.content))throw new DomainError('INVALID_COMMAND','Content must be available or all.');console.log(JSON.stringify(await refresh.refresh({content:values.content==='all'?'all':'available',rebuild:values.rebuild??false},new AbortController().signal)));return;}
   if(command==='doctor'){const result=await handlers.library_status({});console.log(JSON.stringify(result));if(result.status==='error')process.exitCode=1;return;}
   const server=createMcpServer(handlers);let closing=false;const close=async()=>{if(closing)return;closing=true;await server.close();await embedder?.close?.();store.close();};process.stdin.once('end',()=>void close());process.once('SIGTERM',()=>void close().then(()=>process.exit(0)));process.once('SIGINT',()=>void close().then(()=>process.exit(0)));await server.connect(new StdioServerTransport());

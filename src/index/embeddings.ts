@@ -27,7 +27,7 @@ export async function chunkText(text:string,count:(text:string)=>Promise<number>
  const ranges:{start:number;end:number}[]=[];let start=0;
  while(start<text.length){let end=Math.min(text.length,start+1600);
   if(end<text.length&&/[\uD800-\uDBFF]/u.test(text[end-1]!))end--;
-  while(await count('passage: '+text.slice(start,end))>512){end=start+Math.floor((end-start)*0.75);if(end<=start)throw new DomainError('CAPABILITY_UNAVAILABLE','Tokenizer cannot fit a passage.');if(/[\uD800-\uDBFF]/u.test(text[end-1]!))end--;}
+  while(await count(text.slice(start,end))>pinned.max_tokens){end=start+Math.floor((end-start)*0.75);if(end<=start)throw new DomainError('CAPABILITY_UNAVAILABLE','Tokenizer cannot fit a passage.');if(/[\uD800-\uDBFF]/u.test(text[end-1]!))end--;}
   ranges.push({start,end});start=end;
  }return ranges;
 }
@@ -41,6 +41,7 @@ export async function createLocalEmbedder(config:EmbeddingConfig):Promise<Embedd
   const {env,pipeline}=await import('@huggingface/transformers');env.allowRemoteModels=false;env.useBrowserCache=false;env.useFSCache=false;
   const extract=await pipeline('feature-extraction',dir,{dtype:'q8',device:'cpu',local_files_only:true,session_options:{intraOpNumThreads:2,interOpNumThreads:1}});
   const countTokens=async(text:string)=>extract.tokenizer(text,{truncation:false}).input_ids.size;
-  return {manifest:modelManifest,countTokens,close:()=>extract.dispose(),async embed(texts,kind){const vectors:Float32Array[]=[];for(const text of texts){const prefixed=kind+': '+text;if(await countTokens(prefixed)>512)throw new DomainError('QUERY_TOO_LONG','Text exceeds the semantic model token budget. Use a shorter query.');const result=await extract(prefixed,{pooling:'mean',normalize:true});const vector=Float32Array.from(result.data as Float32Array);if(vector.length!==384||!vector.every(Number.isFinite))throw unavailable();vectors.push(vector);}return vectors;}};
+  // This symmetric sentence model uses plain text for queries and passages, without E5 prefixes.
+  return {manifest:modelManifest,countTokens,close:()=>extract.dispose(),async embed(texts,_kind){const vectors:Float32Array[]=[];for(const text of texts){if(await countTokens(text)>pinned.max_tokens)throw new DomainError('QUERY_TOO_LONG','Text exceeds the semantic model token budget. Use a shorter query.');const result=await extract(text,{pooling:'mean',normalize:true});const vector=Float32Array.from(result.data as Float32Array);if(vector.length!==modelManifest.dimensions||!vector.every(Number.isFinite))throw unavailable();vectors.push(vector);}return vectors;}};
  }catch(error){if(error instanceof DomainError)throw error;throw unavailable();}
 }

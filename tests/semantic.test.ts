@@ -55,7 +55,7 @@ it('chunks multilingual text within token budget, retaining every character and 
  const count=async(s:string)=>Array.from(s).length+2;
  const chunks=await chunkText(text,count);
  expect(chunks.length).toBeGreaterThan(1);expect(chunks.map(c=>text.slice(c.start,c.end)).join('')).toBe(text);
- for(const c of chunks){expect(await count('passage: '+text.slice(c.start,c.end))).toBeLessThanOrEqual(512);expect(text.slice(c.start,c.end)).not.toMatch(/^[\uDC00-\uDFFF]|[\uD800-\uDBFF]$/u);}
+ for(const c of chunks){expect(await count(text.slice(c.start,c.end))).toBeLessThanOrEqual(128);expect(text.slice(c.start,c.end)).not.toMatch(/^[\uDC00-\uDFFF]|[\uD800-\uDBFF]$/u);}
 });
 it('requires explicit valid model installation and never marks an interrupted download ready',async()=>{
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'readest-model-'));cleanups.push(()=>fs.rm(dir,{recursive:true,force:true}));const config={enabled:true,model_dir:dir};
@@ -71,4 +71,34 @@ it('indexes vectors only during explicit refresh and includes annotation-only ev
  await refresh.metadata(new AbortController().signal);expect(calls).toBe(0);
  await refresh.refresh({content:'available',rebuild:false},new AbortController().signal);expect(calls).toBe(3);
  expect((await f.store.search(query('semantic'),{manifest,vector:Float32Array.of(1,0)})).items).toHaveLength(3);
+});
+it('indexes continuous section context semantically while preserving original keyword passages',async()=>{
+ const f=await fixture(),parts=['A heading','A useful paragraph with substantive details.'],passages=parts.map((text,i)=>({...f.passages[i]!,text,order:i,location:{...blankLocation('epub'),href:'one.xhtml',spine_index:0,paragraph:i+1,start:i?10:0,end:i?10+text.length:text.length}}));
+ f.store.replaceContent('b',{revision:'r',structure:[],passages,warnings:[],pages:[]});
+ const embedder={manifest,countTokens:async(s:string)=>s.length,embed:async(texts:string[])=>texts.map(()=>Float32Array.of(1,0))},source={mode:'local' as const,source_id:'one',readSnapshot:async()=>f.read,resolveBookFile:async()=>({status:'unavailable' as const,code:'CONTENT_UNAVAILABLE',message:'Cached test content.'})};
+ await createRefreshCoordinator({source,store:f.store,extractor:{extract:async()=>{throw new Error('Unused');}},embedder}).refresh({content:'available',rebuild:false},new AbortController().signal);
+ const result=await f.store.search(query('semantic'),{manifest,vector:Float32Array.of(1,0)});
+ expect(result.items).toHaveLength(1);expect(result.items[0]?.evidence.text).toBe('A heading\nA useful paragraph with substantive details.');
+ expect(result.items[0]?.evidence.location).toMatchObject({start:0,end:54,paragraph:null,href:'one.xhtml'});
+ expect(f.store.getPassage('p0')?.text).toBe('A heading');expect(f.store.getPassage('p1')?.text).toBe(parts[1]);
+ expect((await f.store.search(query('keyword',{query:'heading'}),null)).items.map(h=>h.evidence.passage_id)).toEqual(['p0']);
+ const ref=result.items[0]!.evidence;expect(f.store.getPassage(ref.passage_id)?.text).toBe(ref.text);
+ const hybrid=await f.store.search(query('hybrid',{query:'heading'}),{manifest,vector:Float32Array.of(1,0)});expect(hybrid.items).toHaveLength(1);expect(hybrid.items[0]?.evidence.passage_id).toBe(ref.passage_id);expect(hybrid.items[0]?.score).toBeCloseTo(2/61);
+ expect(f.store.semanticCoverage(manifest,['book_text'])).toMatchObject({covered_books:1,completeness:'complete'});
+ f.store.rebuildSearch();expect((await f.store.search(query('keyword',{query:'heading'}),null)).items.map(h=>h.evidence.passage_id)).toEqual(['p0']);
+});
+it('resolves semantic windows at their actual matching source range and expires them with the source',async()=>{
+ const f=await fixture(),texts=['Heading',('ordinary '.repeat(100))+'late needle '+('ending '.repeat(100))],passages=texts.map((text,i)=>({...f.passages[i]!,text,order:i,location:{...blankLocation('epub'),href:'one.xhtml',spine_index:0,paragraph:i+1,start:i?8:0,end:i?8+text.length:text.length}}));f.store.replaceContent('b',{revision:'r',structure:[],passages,warnings:[],pages:[]});
+ const embedder={manifest,countTokens:async(s:string)=>s.length,embed:async(texts:string[])=>texts.map(t=>t.includes('needle')?Float32Array.of(1,0):Float32Array.of(0,1))},source={mode:'local' as const,source_id:'one',readSnapshot:async()=>f.read,resolveBookFile:async()=>({status:'unavailable' as const,code:'CONTENT_UNAVAILABLE',message:'Cached test content.'})};await createRefreshCoordinator({source,store:f.store,extractor:{extract:async()=>{throw new Error('Unused');}},embedder}).refresh({content:'available',rebuild:false},new AbortController().signal);
+ const result=await f.store.search(query('semantic'),{manifest,vector:Float32Array.of(1,0)}),hit=result.items[0]!.evidence,read=f.store.getPassage(hit.passage_id)!;
+ expect(read.text.length).toBeLessThanOrEqual(1600);expect(read.text).toContain('needle');expect(read.location.start).toBeGreaterThan(800);expect(read.text).toContain(hit.text);
+ expect(f.store.getPassage(hit.passage_id+'garbage')).toBeNull();
+ expect(()=>f.store.replaceEmbeddings('b',manifest,[{passage_id:hit.passage_id,start:0,end:1,vector:Float32Array.of(1,0)}])).toThrow();
+ f.store.replaceContent('b',{revision:'new',structure:[],passages:[],warnings:[],pages:[]});expect(f.store.getPassage(hit.passage_id)).toBeNull();
+});
+it('keeps a distant exact lexical window when fusing the same section with a different conceptual window',async()=>{
+ const f=await fixture(),texts=['Unrelated introduction about weather.',('background '.repeat(140)),'Exact term quasar appears in this final paragraph.'];let offset=0;const passages=texts.map((text,i)=>{const p={...f.passages[i]!,text,order:i,location:{...blankLocation('epub'),href:'one.xhtml',spine_index:0,paragraph:i+1,start:offset,end:offset+text.length}};offset+=text.length+1;return p;});
+ f.store.replaceContent('b',{revision:'r',structure:[],passages,warnings:[],pages:[]});f.store.prepareSemanticEvidence('b');const unit=f.store.semanticEvidenceForBook('b')[0]!,end=unit.text.length,at=unit.text.indexOf('Exact term');
+ f.store.replaceEmbeddings('b',manifest,[{passage_id:unit.passage_id,start:0,end:100,vector:Float32Array.of(1,0)},{passage_id:unit.passage_id,start:at,end,vector:Float32Array.of(0,1)}]);
+ const hybrid=await f.store.search(query('hybrid',{query:'quasar'}),{manifest,vector:Float32Array.of(1,0)});expect(hybrid.items).toHaveLength(1);expect(hybrid.items[0]?.score).toBeCloseTo(2/61);expect(hybrid.items[0]?.evidence.text).toContain('quasar');expect(f.store.getPassage(hybrid.items[0]!.evidence.passage_id)?.text).toContain('quasar');
 });

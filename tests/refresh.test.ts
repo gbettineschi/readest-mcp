@@ -52,3 +52,20 @@ it('rebuilds derived search rows even when source records and file bytes did not
   const f=await fixture();await f.refresh.refresh({content:'available',rebuild:false},signal());const db=new DatabaseSync(path.join(f.cache,f.source.source_id,'index.sqlite'));db.exec('DELETE FROM search_fts');db.close();
   await f.refresh.refresh({content:'available',rebuild:true},signal());expect((await f.store.search(inputSchemas.search_library.parse({query:'incertezza'}),null)).items).toHaveLength(1);expect((await f.store.search(inputSchemas.search_library.parse({query:'"comment 1"',targets:['notes']}),null)).items).toHaveLength(1);
 });
+it('re-extracts unchanged bytes when extraction settings change, then reuses that profile',async()=>{
+ const f=await fixture();await f.refresh.refresh({content:'available',rebuild:false},signal());
+ const book=f.store.listBooks(inputSchemas.list_books.parse({})).items.find(b=>b.source_key===keys.a)!,saved=f.store.getContent(book.id)!;
+ const actual=createDocumentExtractor(),newExtractor={cacheKey:()=> 'changed-profile',async extract(b:Book,file:any){return {...await actual.extract(b,file),extraction_key:'changed-profile'};}};
+ await createRefreshCoordinator({source:f.source,store:f.store,extractor:newExtractor}).prepare(book,signal());
+ expect(f.store.getContent(book.id)?.extraction_key).toBe('changed-profile');
+ const cachedOnly={cacheKey:()=> 'changed-profile',async extract(){throw new Error('matching profile must reuse cache');}};
+ expect((await createRefreshCoordinator({source:f.source,store:f.store,extractor:cachedOnly}).prepare(book,signal())).revision).toBe(saved.revision);
+});
+it('re-extracts unchanged source bytes on an explicit rebuild to retry failed extraction settings',async()=>{
+ const f=await fixture();await f.refresh.refresh({content:'available',rebuild:false},signal());
+ const book=f.store.listBooks(inputSchemas.list_books.parse({})).items.find(b=>b.source_key===keys.a)!,saved=f.store.getContent(book.id)!;
+ f.store.replaceContent(book.id,{...saved,passages:saved.passages.map(p=>({...p,text:'outdated extraction',location:{...p.location,end:p.location.start+19}})),warnings:[{code:'OCR_FAILED',message:'A previous extraction failed.'}]});
+ await f.refresh.refresh({content:'available',rebuild:true},signal());
+ expect((await f.store.search(inputSchemas.search_library.parse({query:'incertezza',filters:{book_ids:[book.id]}}),null)).items).toHaveLength(1);
+ expect(f.store.getContent(book.id)?.warnings).toEqual([]);
+});

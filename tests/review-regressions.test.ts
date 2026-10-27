@@ -22,6 +22,14 @@ async function fixture(options:{body?:string;pdf?:boolean;notes?:unknown[]}={}){
  const handlers=createToolHandlers({source,store,refresh});const id=store.listBooks(inputSchemas.list_books.parse({})).items.find(b=>b.source_key===keys.a)!.id;return {...f,file,source,store,refresh,handlers,id};
 }
 const note=(value:string)=>({id:'n',type:'notebook',note:value,text:'Needle',cfi:null});
+it('keeps OCR uncertainty separate from missing-text coverage and preserves provenance',async()=>{
+ const f=await fixture(),content=f.store.getContent(f.id)!;
+ f.store.replaceContent(f.id,{...content,passages:content.passages.map(p=>({...p,text_origin:'ocr' as const})),warnings:[{code:'OCR_APPLIED',message:'Recognized text may contain errors.'}]});
+ const result=await f.handlers.search_library(inputSchemas.search_library.parse({query:'Known',targets:['book_text'],filters:{book_ids:[f.id]}}));
+ expect(result.warnings.map(w=>w.code)).toEqual(['OCR_APPLIED']);
+ expect(result.meta.coverage).toMatchObject({known_books:1,covered_books:1,completeness:'complete'});
+ expect(result.data?.items[0]?.evidence.text_origin).toBe('ocr');
+});
 it('exposes mixed PDF gaps in search, structure and an empty page read',async()=>{
  const f=await fixture({pdf:true}),found=await f.handlers.search_library(inputSchemas.search_library.parse({query:'Known',targets:['book_text'],filters:{book_ids:[f.id]}}));
  expect(found.status).toBe('partial');expect(found.warnings.some(w=>w.code==='TEXT_GAPS')).toBe(true);expect(found.meta.coverage.completeness).toBe('partial');
@@ -72,4 +80,20 @@ it('never serves a prior account cache after credentials change, even within the
  await fs.writeFile(f.config.credential_file,JSON.stringify({...f.session,user_id:'00000000-0000-4000-8000-000000000099'}),{mode:0o600});
  const result=await handlers.list_books(inputSchemas.list_books.parse({}));expect(result.data).toBeNull();expect(result.error?.code).toBe('ACCOUNT_CHANGED');
  await expect(refresh.metadata(signal())).rejects.toMatchObject({code:'ACCOUNT_CHANGED'});
+});
+it('treats an all-blank PDF as available empty content without incomplete-coverage warnings',async()=>{
+ const f=await fixture({pdf:true}),{PDFDocument}=await import('pdf-lib'),doc=await PDFDocument.create();doc.addPage([500,700]);await fs.writeFile(f.file,await doc.save());await f.refresh.refresh({content:'available',rebuild:false},signal());
+ const result=await f.handlers.get_book(inputSchemas.get_book.parse({book_id:f.id,include_structure:true}));
+ expect(result.data?.book.availability.index).toBe('ready');expect(result.warnings).toEqual([]);expect(result.meta.coverage.completeness).toBe('complete');
+ const page=result.data!.structure!.items[0]!,read=await f.handlers.read_content(inputSchemas.read_content.parse({selector:{kind:'structure',id:page.id}}));expect(read.data?.items).toEqual([]);expect(read.warnings).toEqual([]);
+});
+it('rejects an old page reference when on-demand preparation changes the extraction profile',async()=>{
+ const f=await fixture({pdf:true}),old=f.store.getContent(f.id)!.structure[0]!,refresh=createRefreshCoordinator({source:f.source,store:f.store,extractor:createDocumentExtractor({ocr:{enabled:true,command:'missing-tesseract',languages:['eng']}})}),handlers=createToolHandlers({source:f.source,store:f.store,refresh});
+ const result=await handlers.read_content(inputSchemas.read_content.parse({selector:{kind:'structure',id:old.id}}));
+ expect(result.error?.code).toBe('STALE_REFERENCE');expect(result.data).toBeNull();
+});
+it('flags cached text from obsolete extraction settings before serving search',async()=>{
+ const f=await fixture({pdf:true}),refresh=createRefreshCoordinator({source:f.source,store:f.store,extractor:createDocumentExtractor({ocr:{enabled:true,command:'missing-tesseract',languages:['eng']}})}),handlers=createToolHandlers({source:f.source,store:f.store,refresh});
+ const result=await handlers.search_library(inputSchemas.search_library.parse({query:'Known',targets:['book_text'],filters:{book_ids:[f.id]}}));
+ expect(result.warnings.map(w=>w.code)).toContain('EXTRACTION_STALE');expect(result.meta.from_cache).toBe(true);expect(result.meta.coverage.completeness).toBe('partial');expect(f.store.getBook(f.id)?.availability.index).toBe('pending');
 });

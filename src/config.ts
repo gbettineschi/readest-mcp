@@ -7,11 +7,12 @@ import {within,plannedRealPath} from './security/paths.js';
 import cloudDefaults from './sources/cloud-defaults.json' with {type:'json'};
 export interface CacheConfig {cache_dir:string;}
 export interface EmbeddingConfig {enabled:boolean;model_dir:string;}
-interface BaseConfig extends CacheConfig {embeddings:EmbeddingConfig;}
+export interface OcrConfig {enabled:boolean;command:string;languages:string[];}
+interface BaseConfig extends CacheConfig {embeddings:EmbeddingConfig;ocr?:OcrConfig;}
 export interface LocalConfig extends BaseConfig {source:'local';library_dir:string;content_roots:string[];}
 export interface CloudConfig extends BaseConfig {source:'cloud';api_base:string;auth_url:string;anon_key:string;credential_file:string;}
 export type Config=LocalConfig|CloudConfig;
-const base={cache_dir:z.string().optional(),embeddings:z.object({enabled:z.boolean().default(false),model_dir:z.string().optional()}).optional()};
+const base={cache_dir:z.string().optional(),embeddings:z.object({enabled:z.boolean().default(false),model_dir:z.string().optional()}).optional(),ocr:z.object({enabled:z.boolean().default(false),command:z.string().min(1).default('tesseract'),languages:z.array(z.string().regex(/^[a-zA-Z0-9_]+$/)).min(1).max(4).default(['eng'])}).strict().optional()};
 const schema=z.discriminatedUnion('source',[
   z.object({source:z.literal('local'),library_dir:z.string().optional(),content_roots:z.array(z.string()).default([]),...base}).strict(),
   z.object({source:z.literal('cloud'),api_base:z.url().default(cloudDefaults.api_base),auth_url:z.url().default(cloudDefaults.auth_url),anon_key:z.string().min(1).default(cloudDefaults.anon_key),credential_file:z.string().default(path.join(os.homedir(),'.config','readest-mcp','credentials.json')),...base}).strict()
@@ -34,7 +35,7 @@ export async function loadConfig(file:string):Promise<Config>{
   if(parsed.source==='local'){
     const library_dir=parsed.library_dir?expand(parsed.library_dir,dir):await detectLibrary();const content_roots=parsed.content_roots.map(p=>expand(p,dir));
     for(const root of [library_dir,...content_roots]){const real=await plannedRealPath(root);if(within(await plannedRealPath(cache_dir),real)||within(await plannedRealPath(embeddings.model_dir),real))throw new DomainError('INVALID_CONFIG','Cache and model directories must be outside source content roots.');}
-    return {source:'local',library_dir,content_roots,cache_dir,embeddings};
+    return {source:'local',library_dir,content_roots,cache_dir,embeddings,ocr:parsed.ocr};
   }
   for(const p of [parsed.api_base,parsed.auth_url])if(new URL(p).protocol!=='https:'&&!['localhost','127.0.0.1','[::1]'].includes(new URL(p).hostname))throw new DomainError('INVALID_CONFIG','Cloud connections require HTTPS.');
   return {...parsed,cache_dir,embeddings,credential_file:expand(parsed.credential_file,dir)};

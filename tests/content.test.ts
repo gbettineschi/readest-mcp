@@ -2,11 +2,17 @@ import {afterEach,describe,expect,it} from 'vitest';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import {extractBook} from '../dist/content/extract.js';
+import {extractBook,createDocumentExtractor} from '../dist/content/extract.js';
 import {bookFile,epub,pdf} from './helpers/books.js';
+import {PDFDocument} from 'pdf-lib';
 const dirs:string[]=[];afterEach(async()=>{await Promise.all(dirs.splice(0).map(d=>fs.rm(d,{recursive:true,force:true})));});
 async function directory(){const d=await fs.mkdtemp(path.join(os.tmpdir(),'readest-content-'));dirs.push(d);return d;}
 describe('bounded EPUB/PDF extraction',()=>{
+  it('does not report genuinely blank PDF pages as missing text',async()=>{
+    const doc=await PDFDocument.create();doc.addPage([500,700]);
+    const input=await bookFile(await directory(),'PDF',Buffer.from(await doc.save())),result=await extractBook(input.book,input.file);
+    expect(result.pages).toEqual([{page:1,status:'blank'}]);expect(result.passages).toEqual([]);expect(result.warnings).toEqual([]);
+  });
   it.each([2,3] as const)('reads EPUB %i spine order, Unicode and recursive navigation',async version=>{
     const input=await bookFile(await directory(),'EPUB',await epub(version)),before=await fs.readFile(input.file.path);const content=await extractBook(input.book,input.file);
     expect(content.passages.map(p=>p.text)).toEqual(['Decisioni','L’incertezza non impedisce una scelta ragionevole.','Second paragraph.','Further notes','Una nota: café.']);
@@ -22,6 +28,21 @@ describe('bounded EPUB/PDF extraction',()=>{
   it('reports PDFs without text rather than generating an empty passage',async()=>{
     const input=await bookFile(await directory(),'PDF',await pdf([null]));const result=await extractBook(input.book,input.file);expect(result.passages).toEqual([]);expect(result.warnings.some(w=>w.code==='OCR_REQUIRED')).toBe(true);
   });
+  it('retains native PDF text and image gaps when configured OCR cannot run',async()=>{
+    const input=await bookFile(await directory(),'PDF',await pdf(['Native evidence.',null]));
+    const extractor=createDocumentExtractor({ocr:{enabled:true,command:path.join(await directory(),'missing-tesseract'),languages:['eng']}});
+    const result=await extractor.extract(input.book,input.file);
+    expect(result.passages.map(p=>p.text)).toEqual(['Native evidence.']);
+    expect(result.pages).toEqual([{page:1,status:'text'},{page:2,status:'empty'}]);
+    expect(result.warnings.map(w=>w.code)).toContain('OCR_UNAVAILABLE');
+    expect(result.warnings.map(w=>w.code)).toContain('TEXT_GAPS');
+  });
+  it('binds PDF references to extraction settings as well as the original file revision',async()=>{
+    const input=await bookFile(await directory(),'PDF',await pdf(['Stable native text.']));
+    const a=await createDocumentExtractor().extract(input.book,input.file),b=await createDocumentExtractor({ocr:{enabled:true,command:'tesseract',languages:['eng']}}).extract(input.book,input.file);
+    expect(b.revision).toBe(a.revision);expect(b.passages[0]?.text).toBe(a.passages[0]?.text);
+    expect(b.passages[0]?.passage_id).not.toBe(a.passages[0]?.passage_id);expect(b.structure[0]?.id).not.toBe(a.structure[0]?.id);
+  });
   it('rejects corrupted books and mismatched snapshots without invented content',async()=>{
     const input=await bookFile(await directory(),'PDF',Buffer.from('%PDF-1.7 incomplete'));
     await expect(extractBook(input.book,input.file)).rejects.toMatchObject({code:'EXTRACTION_FAILED'});
@@ -35,4 +56,16 @@ describe('bounded EPUB/PDF extraction',()=>{
     const bytes=await fs.readFile(new URL('./fixtures/password.pdf',import.meta.url));const input=await bookFile(await directory(),'PDF',bytes);
     await expect(extractBook(input.book,input.file)).rejects.toMatchObject({code:'PASSWORD_PROTECTED'});
   });
+});
+it.skipIf(process.env.READEST_TEST_OCR!=='1')('reads a synthetic scan locally with page provenance and exact source offsets',async()=>{
+ const doc=await PDFDocument.create(),png=await doc.embedPng(await fs.readFile(new URL('./fixtures/scanned-page.png',import.meta.url)));
+ doc.addPage([600,300]).drawImage(png,{x:0,y:0,width:600,height:300});doc.addPage([600,300]);
+ const input=await bookFile(await directory(),'PDF',Buffer.from(await doc.save()));
+ const extractor=createDocumentExtractor({ocr:{enabled:true,command:process.env.READEST_TESSERACT??'tesseract',languages:['eng']}}),result=await extractor.extract(input.book,input.file);
+ expect(result.passages[0]).toMatchObject({text_origin:'ocr',location:{kind:'pdf',page:1,start:0}});
+ expect(result.passages[0]?.text).toContain('Uninterrupted practice improves skills.');
+ expect(result.passages[0]?.location.end).toBe(result.passages[0]?.text.length);
+ expect(result.pages).toEqual([{page:1,status:'ocr'},{page:2,status:'blank'}]);
+ expect(result.warnings.map(w=>w.code)).toEqual(['OCR_APPLIED']);
+ expect(await fs.readFile(input.file.path)).toEqual(Buffer.from(await doc.save()));
 });

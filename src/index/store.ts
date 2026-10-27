@@ -9,8 +9,10 @@ import type {Inputs,Outputs} from '../mcp/schemas.js';
 import {LIMITS} from '../limits.js';
 import {withFileLock} from '../security/lock.js';
 import {matchesBook,keywordQuery,cursorKey,readCursor,writeCursor} from './search.js';
+import {retrievalUnits} from './documents.js';
 
 const unique=(warnings:Warning[])=>[...new Map(warnings.map(w=>[JSON.stringify([w.code,w.message,w.book_id,w.targets]),w])).values()];
+type RankedHit={id:string;score:number;start:number;end?:number};
 export class IndexStore {
   private db:DatabaseSync;private directory:string;
   constructor(config:CacheConfig,public readonly source_id:string){
@@ -37,12 +39,17 @@ export class IndexStore {
   getBook(id:string):Book|null{const row=this.db.prepare('SELECT data FROM books WHERE id=?').get(id);return row?BookSchema.parse(JSON.parse(String(row.data))):null;}
   getAnnotation(id:string):Annotation|null{const row=this.db.prepare('SELECT data FROM annotations WHERE id=?').get(id);return row?AnnotationSchema.parse(JSON.parse(String(row.data))):null;}
   getContent(id:string):ExtractedBook|null{const row=this.db.prepare('SELECT data FROM contents WHERE book_id=?').get(id);if(!row)return null;const content=JSON.parse(String(row.data)) as ExtractedBook;const book=this.getBook(id);if(book)content.passages=content.passages.map(p=>({...p,title:book.title,author:book.author}));return content;}
-  getPassage(id:string):Passage|null{const row=this.db.prepare('SELECT data FROM evidence WHERE id=?').get(id);if(!row)return null;const passage=JSON.parse(String(row.data)) as Passage,book=this.getBook(passage.book_id);return book?{...passage,title:book.title,author:book.author}:null;}
+  getPassage(id:string):Passage|null{
+    const range=/^(p_[a-f0-9]{32})~(0|[1-9][0-9]{0,8})~([1-9][0-9]{0,8})$/.exec(id),row=this.db.prepare('SELECT data FROM evidence WHERE id=?').get(range?.[1]??id);if(!row)return null;
+    let passage=JSON.parse(String(row.data)) as Passage;const book=this.getBook(passage.book_id);if(!book)return null;
+    if(range){const start=Number(range[2]),end=Number(range[3]);if(!passage.retrieval_unit||start>=end||end>passage.text.length)return null;passage={...passage,passage_id:id,text:passage.text.slice(start,end),location:{...passage.location,start:passage.location.start+start,end:passage.location.start+end}};}
+    return {...passage,title:book.title,author:book.author};
+  }
   private removeEvidence(book_id:string,kinds:string[]=['book_text','quote','note']):void{
     for(const kind of kinds){this.db.prepare('DELETE FROM vectors WHERE passage_id IN (SELECT id FROM evidence WHERE book_id=? AND source_kind=?)').run(book_id,kind);this.db.prepare('DELETE FROM search_fts WHERE book_id=? AND source_kind=?').run(book_id,kind);this.db.prepare('DELETE FROM evidence WHERE book_id=? AND source_kind=?').run(book_id,kind);}
   }
-  private insertEvidence(passage:Passage):void{
-    this.db.prepare('INSERT INTO evidence(id,book_id,source_kind,data) VALUES (?,?,?,?)').run(passage.passage_id,passage.book_id,passage.source_kind,JSON.stringify(passage));this.db.prepare('INSERT INTO search_fts(id,book_id,source_kind,text) VALUES (?,?,?,?)').run(passage.passage_id,passage.book_id,passage.source_kind,passage.text);
+  private insertEvidence(passage:Passage,lexical=true):void{
+    this.db.prepare('INSERT INTO evidence(id,book_id,source_kind,data) VALUES (?,?,?,?)').run(passage.passage_id,passage.book_id,passage.source_kind,JSON.stringify(passage));if(lexical)this.db.prepare('INSERT INTO search_fts(id,book_id,source_kind,text) VALUES (?,?,?,?)').run(passage.passage_id,passage.book_id,passage.source_kind,passage.text);
   }
   private removeBook(id:string):void{this.removeEvidence(id);this.db.prepare('DELETE FROM annotations WHERE book_id=?').run(id);this.db.prepare('DELETE FROM contents WHERE book_id=?').run(id);this.db.prepare('DELETE FROM file_versions WHERE book_id=?').run(id);this.db.prepare('DELETE FROM books WHERE id=?').run(id);}
   private indexAnnotations(book:Book):void{
@@ -78,11 +85,15 @@ export class IndexStore {
     this.transaction(()=>{const book=this.getBook(book_id);if(!book)throw new DomainError('CONTENT_UNAVAILABLE','Book is no longer in the catalogue.');
       if(content.passages.some(p=>p.book_id!==book_id||p.revision!==content.revision)||content.structure.some(s=>s.book_id!==book_id||s.revision!==content.revision))throw new DomainError('INDEX_UNAVAILABLE','Extracted content identity does not match its book.');
       this.removeEvidence(book_id,['book_text']);this.db.prepare('INSERT INTO contents(book_id,revision,data) VALUES (?,?,?) ON CONFLICT(book_id) DO UPDATE SET revision=excluded.revision,data=excluded.data').run(book_id,content.revision,JSON.stringify(content));for(const passage of content.passages)this.insertEvidence(passage);
-      book.revision=content.revision;book.availability.index=content.passages.length?'ready':'unsupported';this.db.prepare('UPDATE books SET data=? WHERE id=?').run(JSON.stringify(book),book_id);this.bump();});
+      book.revision=content.revision;book.availability.index=content.passages.length||(content.pages.length>0&&content.pages.every(p=>p.status==='blank'))?'ready':'unsupported';this.db.prepare('UPDATE books SET data=? WHERE id=?').run(JSON.stringify(book),book_id);this.bump();});
   }
   markContentError(book_id:string,error:DomainError):void{const book=this.getBook(book_id);if(!book)return;book.availability.index='failed';this.transaction(()=>{this.db.prepare('UPDATE books SET data=? WHERE id=?').run(JSON.stringify(book),book_id);this.setMeta('warnings',unique([...this.warnings(),{code:error.code,message:error.message,book_id,targets:['book_text']}]));this.bump();});}
+  reconcileExtractionProfiles(key:(book:Book)=>string|undefined):void{
+    const stale=this.allBooks().filter(b=>{const content=this.getContent(b.id);return content&&content.extraction_key!==key(b)&&b.availability.index!=='pending';});
+    if(stale.length)this.transaction(()=>{for(const b of stale){b.availability.index='pending';this.db.prepare('UPDATE books SET data=? WHERE id=?').run(JSON.stringify(b),b.id);}this.bump();});
+  }
   recordRefreshFailure(error:DomainError):void{this.transaction(()=>{this.setMeta('last_error',error.message);this.setMeta('warnings',unique([...this.warnings(),{code:'REFRESH_FAILED',message:error.message},{code:'USING_CACHE',message:'The last saved source snapshot is being used.'}]));});}
-  rebuildSearch():void{this.transaction(()=>{for(const book of this.allBooks())this.indexAnnotations(book);this.db.exec('DELETE FROM search_fts');for(const row of this.db.prepare('SELECT data FROM evidence').iterate()){const p=JSON.parse(String(row.data)) as Passage;this.db.prepare('INSERT INTO search_fts(id,book_id,source_kind,text) VALUES (?,?,?,?)').run(p.passage_id,p.book_id,p.source_kind,p.text);}this.bump();});}
+  rebuildSearch():void{this.transaction(()=>{for(const book of this.allBooks())this.indexAnnotations(book);this.db.exec('DELETE FROM search_fts');for(const row of this.db.prepare('SELECT data FROM evidence').iterate()){const p=JSON.parse(String(row.data)) as Passage;if(!p.retrieval_unit)this.db.prepare('INSERT INTO search_fts(id,book_id,source_kind,text) VALUES (?,?,?,?)').run(p.passage_id,p.book_id,p.source_kind,p.text);}this.bump();});}
   private paginate<T>(items:T[],limit:number,cursor:string|null,key:string):Page<T>{const offset=readCursor(cursor,this.generation(),key);return {items:items.slice(offset,offset+limit),next_cursor:items.length>offset+limit?writeCursor(this.generation(),key,offset+limit):null};}
   listBooks(input:Inputs['list_books']):Outputs['list_books']{return this.paginate(this.allBooks().filter(b=>matchesBook(b,input.filters)),input.limit,input.cursor,cursorKey({kind:'books',filters:input.filters,limit:input.limit}));}
   listAnnotations(input:Inputs['list_annotations']):Outputs['list_annotations']{
@@ -91,13 +102,22 @@ export class IndexStore {
   }
   getStructure(book_id:string,input:{limit:number;cursor:string|null}):Page<StructureItem>{return this.paginate(this.getContent(book_id)?.structure??[],input.limit,input.cursor,cursorKey({kind:'structure',book_id,limit:input.limit}));}
   evidenceForBook(book_id:string):Passage[]{return this.db.prepare('SELECT data FROM evidence WHERE book_id=? ORDER BY id').all(book_id).map(r=>JSON.parse(String(r.data)) as Passage);}
+  semanticEvidenceForBook(book_id:string):Passage[]{return [...retrievalUnits(this.getContent(book_id)?.passages??[]),...this.db.prepare("SELECT data FROM evidence WHERE book_id=? AND source_kind!='book_text' ORDER BY id").all(book_id).map(r=>JSON.parse(String(r.data)) as Passage)];}
+  prepareSemanticEvidence(book_id:string):void{
+    const units=this.semanticEvidenceForBook(book_id).filter(p=>p.retrieval_unit),expected=new Set(units.map(p=>p.passage_id)),existing=this.db.prepare("SELECT data FROM evidence WHERE book_id=? AND json_extract(data,'$.retrieval_unit')=1").all(book_id).map(r=>JSON.parse(String(r.data)) as Passage),present=new Set(existing.map(p=>p.passage_id));
+    const removed=existing.filter(p=>!expected.has(p.passage_id)),added=units.filter(p=>!present.has(p.passage_id));
+    if(removed.length||added.length)this.transaction(()=>{for(const p of removed){this.db.prepare('DELETE FROM vectors WHERE passage_id=?').run(p.passage_id);this.db.prepare('DELETE FROM search_fts WHERE id=?').run(p.passage_id);this.db.prepare('DELETE FROM evidence WHERE id=?').run(p.passage_id);}for(const p of added)this.insertEvidence(p,false);this.bump();});
+  }
   private modelKey(m:ModelManifest):string{return hash(JSON.stringify([m.id,m.revision,m.dtype,m.dimensions,m.chunk_version]));}
-  hasEmbeddings(book_id:string,manifest:ModelManifest):boolean{const evidence=this.evidenceForBook(book_id);return evidence.every(p=>Boolean(this.db.prepare('SELECT 1 FROM vectors WHERE passage_id=? AND revision=? AND model=? LIMIT 1').get(p.passage_id,p.revision,this.modelKey(manifest))));}
+  hasEmbeddings(book_id:string,manifest:ModelManifest):boolean{const evidence=this.semanticEvidenceForBook(book_id);return evidence.every(p=>Boolean(this.db.prepare('SELECT 1 FROM vectors WHERE passage_id=? AND revision=? AND model=? LIMIT 1').get(p.passage_id,p.revision,this.modelKey(manifest))));}
   replaceEmbeddings(book_id:string,manifest:ModelManifest,chunks:EmbeddedChunk[]):void{
     this.transaction(()=>{if(!this.getBook(book_id))throw new DomainError('STALE_REFERENCE','Book is no longer available.');const model=this.modelKey(manifest);
-      for(const c of chunks){const p=this.getPassage(c.passage_id);if(!p||p.book_id!==book_id||c.vector.length!==manifest.dimensions||!c.vector.every(Number.isFinite)||!Number.isInteger(c.start)||!Number.isInteger(c.end)||c.start<0||c.end<=c.start||c.end>p.text.length||!c.vector.some(v=>v!==0))throw new DomainError('INDEX_UNAVAILABLE','Invalid embedding identity, range or vector.');}
+      const parents=new Map<string,{book_id:string;revision:string;length:number}>(),read=this.db.prepare('SELECT data FROM evidence WHERE id=?');
+      for(const c of chunks){let p=parents.get(c.passage_id);if(!p){const row=read.get(c.passage_id);if(row){const source=JSON.parse(String(row.data)) as Passage;p={book_id:source.book_id,revision:source.revision,length:source.text.length};parents.set(c.passage_id,p);}}
+        if(!p||p.book_id!==book_id||c.vector.length!==manifest.dimensions||!c.vector.every(Number.isFinite)||!Number.isInteger(c.start)||!Number.isInteger(c.end)||c.start<0||c.end<=c.start||c.end>p.length||!c.vector.some(v=>v!==0))throw new DomainError('INDEX_UNAVAILABLE','Invalid embedding identity, range or vector.');}
       this.db.prepare('DELETE FROM vectors WHERE book_id=? AND model=?').run(book_id,model);
-      for(const c of chunks){const p=this.getPassage(c.passage_id)!;this.db.prepare('INSERT INTO vectors(passage_id,book_id,revision,model,start,end,vector) VALUES (?,?,?,?,?,?,?)').run(c.passage_id,book_id,p.revision,model,c.start,c.end,Buffer.from(c.vector.buffer,c.vector.byteOffset,c.vector.byteLength));}this.bump();
+      const insert=this.db.prepare('INSERT INTO vectors(passage_id,book_id,revision,model,start,end,vector) VALUES (?,?,?,?,?,?,?)');
+      for(const c of chunks)insert.run(c.passage_id,book_id,parents.get(c.passage_id)!.revision,model,c.start,c.end,Buffer.from(c.vector.buffer,c.vector.byteOffset,c.vector.byteLength));this.bump();
     });
   }
   async search(input:Inputs['search_library'],semantic:QueryEmbedding|null):Promise<Outputs['search_library']>{
@@ -105,28 +125,36 @@ export class IndexStore {
     const query=keywordQuery(input.query),books=new Map(this.allBooks().filter(b=>matchesBook(b,input.filters)).map(b=>[b.id,b]));const targets=input.targets.map(t=>t==='quotes'?'quote':t==='notes'?'note':'book_text');
     const used_mode=input.mode==='hybrid'&&!semantic?'keyword':input.mode;
     const key=cursorKey({...input,cursor:null,kind:'search',model:semantic?this.modelKey(semantic.manifest):null}),offset=readCursor(input.cursor,this.generation(),key);
-    const lexical:{id:string;score:number;start:number}[]=[];
+    const lexical:RankedHit[]=[],lexicalSeen=new Set<string>(),unitsByBook=new Map<string,Passage[]>();
     if(used_mode!=='semantic'&&query&&books.size){const rows=this.db.prepare('SELECT e.id,e.data,bm25(search_fts) AS rank FROM search_fts JOIN evidence e ON e.id=search_fts.id WHERE search_fts MATCH ? AND e.book_id IN (SELECT value FROM json_each(?)) AND e.source_kind IN (SELECT value FROM json_each(?)) ORDER BY rank,e.id').iterate(query,JSON.stringify([...books.keys()]),JSON.stringify(targets));
-      for(const row of rows){const p=JSON.parse(String(row.data)) as Passage,term=input.query.match(/[\p{L}\p{N}_]+/u)?.[0]??'';lexical.push({id:String(row.id),score:-Number(row.rank),start:Math.max(0,p.text.toLocaleLowerCase().indexOf(term.toLocaleLowerCase())-80)});}
+      for(const row of rows){const p=JSON.parse(String(row.data)) as Passage,term=input.query.match(/[\p{L}\p{N}_]+/u)?.[0]??'';let id=String(row.id),start=Math.max(0,p.text.toLocaleLowerCase().indexOf(term.toLocaleLowerCase())-80);
+        // Fuse both channels at the same document identity. Keyword-only reads retain paragraph granularity.
+        if(used_mode==='hybrid'&&p.source_kind==='book_text'){
+          let units=unitsByBook.get(p.book_id);if(!units){units=this.semanticEvidenceForBook(p.book_id).filter(u=>u.source_kind==='book_text'&&this.getPassage(u.passage_id));unitsByBook.set(p.book_id,units);}
+          const unit=units.find(u=>u.structure_id===p.structure_id&&u.location.start<=p.location.start&&u.location.end>=p.location.end);
+          if(unit){id=unit.passage_id;start+=p.location.start-unit.location.start;}
+        }
+        if(!lexicalSeen.has(id)){lexicalSeen.add(id);lexical.push({id,score:-Number(row.rank),start});}
+      }
     }
-    const best=new Map<string,{id:string;score:number;start:number}>();
+    const best=new Map<string,RankedHit>();
     if(used_mode!=='keyword'&&semantic){const q=semantic.vector,norm=Math.hypot(...q);if(q.length!==semantic.manifest.dimensions||!q.every(Number.isFinite)||!norm)throw new DomainError('CAPABILITY_UNAVAILABLE','Query embedding is invalid.');
       for(const row of this.db.prepare('SELECT v.*,e.source_kind FROM vectors v JOIN evidence e ON e.id=v.passage_id WHERE v.model=? AND v.book_id IN (SELECT value FROM json_each(?)) AND e.source_kind IN (SELECT value FROM json_each(?))').iterate(this.modelKey(semantic.manifest),JSON.stringify([...books.keys()]),JSON.stringify(targets))){
-        const bytes=row.vector as Uint8Array,copy=Uint8Array.from(bytes),v=new Float32Array(copy.buffer);if(v.length!==q.length)continue;let dot=0,n=0;for(let i=0;i<q.length;i++){dot+=q[i]!*v[i]!;n+=v[i]!**2;}const score=dot/(norm*Math.sqrt(n)),id=String(row.passage_id);if(Number.isFinite(score)&&(!best.has(id)||score>best.get(id)!.score))best.set(id,{id,score,start:Number(row.start)});
+        const bytes=row.vector as Uint8Array,copy=Uint8Array.from(bytes),v=new Float32Array(copy.buffer);if(v.length!==q.length)continue;let dot=0,n=0;for(let i=0;i<q.length;i++){dot+=q[i]!*v[i]!;n+=v[i]!**2;}const score=dot/(norm*Math.sqrt(n)),id=String(row.passage_id);if(Number.isFinite(score)&&(!best.has(id)||score>best.get(id)!.score))best.set(id,{id,score,start:Number(row.start),end:Number(row.end)});
       }
     }
     const conceptual=[...best.values()].sort((a,b)=>b.score-a.score||a.id.localeCompare(b.id));let ranked=used_mode==='semantic'?conceptual:lexical;
-    if(used_mode==='hybrid'){const fused=new Map<string,{id:string;score:number;start:number}>();for(const list of [lexical,conceptual])list.forEach((hit,i)=>{const old=fused.get(hit.id);fused.set(hit.id,{...hit,score:(old?.score??0)+1/(60+i+1)});});ranked=[...fused.values()].sort((a,b)=>b.score-a.score||a.id.localeCompare(b.id));}
-    const items=ranked.slice(offset,offset+input.limit).map(hit=>{const p=this.getPassage(hit.id)!;return {evidence:{...p,text:p.text.slice(hit.start,hit.start+LIMITS.excerpt),location:{...p.location,start:p.location.start+hit.start,end:Math.min(p.location.end,p.location.start+hit.start+LIMITS.excerpt)}},score:hit.score};});
+    if(used_mode==='hybrid'){const fused=new Map<string,RankedHit>();for(const list of [lexical,conceptual])list.forEach((hit,i)=>{const old=fused.get(hit.id);fused.set(hit.id,{...(old??hit),score:(old?.score??0)+1/(60+i+1)});});ranked=[...fused.values()].sort((a,b)=>b.score-a.score||a.id.localeCompare(b.id));}
+    const items=ranked.slice(offset,offset+input.limit).map(hit=>{const p=this.getPassage(hit.id)!,end=p.retrieval_unit?hit.end??Math.min(p.text.length,hit.start+LIMITS.excerpt):p.text.length,excerptEnd=Math.min(end,hit.start+LIMITS.excerpt),id=p.retrieval_unit&&(hit.start>0||end<p.text.length)?p.passage_id+'~'+hit.start+'~'+end:p.passage_id;return {evidence:{...p,passage_id:id,text:p.text.slice(hit.start,excerptEnd),location:{...p.location,start:p.location.start+hit.start,end:p.location.start+excerptEnd}},score:hit.score};});
     return {items,next_cursor:ranked.length>offset+input.limit?writeCursor(this.generation(),key,offset+input.limit):null,requested_mode:input.mode,used_mode};
   }
   status():Outputs['library_status']{const books=this.allBooks();const formats:Record<string,number>={};for(const b of books)formats[b.format]=(formats[b.format]??0)+1;const indexed=books.filter(b=>b.availability.index==='ready').length;return {known_books:books.length,annotations_available:books.filter(b=>b.availability.annotations==='available').length,text_indexed:indexed,extraction_failed:books.filter(b=>b.availability.index==='failed').length,unavailable_files:books.filter(b=>b.availability.file==='unavailable').length,unindexed_books:books.length-indexed,formats,capabilities:{semantic:false},last_refresh_error:this.lastError()};}
   findStructure(id:string):StructureItem|null{for(const row of this.db.prepare('SELECT data FROM contents').iterate()){const item=(JSON.parse(String(row.data)) as ExtractedBook).structure.find(s=>s.id===id);if(item)return item;}return null;}
   selectedBooks(filters?:Inputs['list_books']['filters']):Book[]{return this.allBooks().filter(b=>matchesBook(b,filters));}
   warningsFor(targets:string[],filters?:Inputs['list_books']['filters']):Warning[]{const ids=new Set(this.selectedBooks(filters).map(b=>b.id)),requested=targets.length?targets:['metadata'];return this.warnings().filter(w=>(!w.book_id||ids.has(w.book_id))&&(!w.targets||w.targets.some(t=>requested.includes(t))));}
-  contentWarnings(filters?:Inputs['list_books']['filters']):Warning[]{return this.selectedBooks(filters).flatMap(b=>{const content=this.getContent(b.id);if(!content)return [];return [...content.warnings.map(w=>({...w,book_id:b.id,targets:['book_text']})),...(b.availability.file==='unavailable'?[{code:'USING_CACHE',message:'Searching the last indexed revision of a book whose source file is unavailable; catalogue refresh does not revalidate these bytes.',book_id:b.id,targets:['book_text']}]:[])];});}
-  coverage(targets:string[]=['book_text','quotes','notes'],filters?:Inputs['list_books']['filters']):Meta['coverage']{const books=this.selectedBooks(filters);const covered=books.filter(b=>(!targets.includes('book_text')||(b.availability.index==='ready'&&!this.getContent(b.id)?.warnings.length))&&(!targets.some(t=>t==='quotes'||t==='notes')||b.availability.annotations==='available')).length;const source=this.meta<Meta['coverage']>('source_coverage'),unvalidated=targets.includes('book_text')&&books.some(b=>b.availability.file==='unavailable'&&this.getContent(b.id));return {scope:'configured_source',known_books:books.length,covered_books:covered,completeness:!this.hasSnapshot()?'unknown':source?.completeness==='partial'||this.lastError()||covered<books.length||this.warningsFor(targets,filters).length?'partial':unvalidated?'unknown':source?.completeness??'unknown'};}
-  semanticCoverage(manifest:ModelManifest,targets:string[],filters?:Inputs['list_books']['filters']):Meta['coverage']{const base=this.coverage(targets,filters),kinds=targets.map(t=>t==='quotes'?'quote':t==='notes'?'note':'book_text');const covered=this.selectedBooks(filters).filter(b=>this.coverage(targets,{book_ids:[b.id]}).covered_books===1&&this.evidenceForBook(b.id).filter(p=>kinds.includes(p.source_kind)).every(p=>Boolean(this.db.prepare('SELECT 1 FROM vectors WHERE passage_id=? AND revision=? AND model=? LIMIT 1').get(p.passage_id,p.revision,this.modelKey(manifest))))).length;return {...base,covered_books:covered,completeness:covered<(base.known_books??0)?'partial':base.completeness};}
+  contentWarnings(filters?:Inputs['list_books']['filters']):Warning[]{return this.selectedBooks(filters).flatMap(b=>{const content=this.getContent(b.id);if(!content)return [];return [...content.warnings.map(w=>({...w,book_id:b.id,targets:['book_text']})),...(b.availability.index==='pending'?[{code:'EXTRACTION_STALE',message:'Cached text uses previous extraction settings. Run refresh to rebuild it.',book_id:b.id,targets:['book_text']},{code:'USING_CACHE',message:'Searching text from the previous extraction settings.',book_id:b.id,targets:['book_text']}]:[]),...(b.availability.file==='unavailable'?[{code:'USING_CACHE',message:'Searching the last indexed revision of a book whose source file is unavailable; catalogue refresh does not revalidate these bytes.',book_id:b.id,targets:['book_text']}]:[])];});}
+  coverage(targets:string[]=['book_text','quotes','notes'],filters?:Inputs['list_books']['filters']):Meta['coverage']{const books=this.selectedBooks(filters);const covered=books.filter(b=>(!targets.includes('book_text')||(b.availability.index==='ready'&&!this.getContent(b.id)?.warnings.some(w=>w.code!=='OCR_APPLIED')))&&(!targets.some(t=>t==='quotes'||t==='notes')||b.availability.annotations==='available')).length;const source=this.meta<Meta['coverage']>('source_coverage'),unvalidated=targets.includes('book_text')&&books.some(b=>b.availability.file==='unavailable'&&this.getContent(b.id));return {scope:'configured_source',known_books:books.length,covered_books:covered,completeness:!this.hasSnapshot()?'unknown':source?.completeness==='partial'||this.lastError()||covered<books.length||this.warningsFor(targets,filters).length?'partial':unvalidated?'unknown':source?.completeness??'unknown'};}
+  semanticCoverage(manifest:ModelManifest,targets:string[],filters?:Inputs['list_books']['filters']):Meta['coverage']{const base=this.coverage(targets,filters),kinds=targets.map(t=>t==='quotes'?'quote':t==='notes'?'note':'book_text');const covered=this.selectedBooks(filters).filter(b=>this.coverage(targets,{book_ids:[b.id]}).covered_books===1&&this.semanticEvidenceForBook(b.id).filter(p=>kinds.includes(p.source_kind)).every(p=>Boolean(this.db.prepare('SELECT 1 FROM vectors WHERE passage_id=? AND revision=? AND model=? LIMIT 1').get(p.passage_id,p.revision,this.modelKey(manifest))))).length;return {...base,covered_books:covered,completeness:covered<(base.known_books??0)?'partial':base.completeness};}
   close():void{this.db.close();}
 }
 export function openIndex(config:CacheConfig,source_id:string):IndexStore{return new IndexStore(config,source_id);}
