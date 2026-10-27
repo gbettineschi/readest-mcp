@@ -45,7 +45,8 @@ export async function createCloudSource(config:CloudConfig,credentials=new Crede
         if(outcome.status==='rejected'){
           if(c==='books'&&!Array.isArray(prior.books_records))throw outcome.reason;
           if(outcome.reason instanceof DomainError&&['AUTH_REQUIRED','ACCESS_DENIED','ACCOUNT_CHANGED'].includes(outcome.reason.code))throw outcome.reason;
-          warnings.push({code:'CHANNEL_UNAVAILABLE',message:'Cloud '+c+' could not be refreshed.'});if(old.length)warnings.push({code:'USING_CACHE',message:'Previously saved '+c+' are being used.'});continue;
+          const targets=c==='notes'?['quotes','notes']:c==='configs'?['metadata']:undefined;
+          warnings.push({code:'CHANNEL_UNAVAILABLE',message:'Cloud '+c+' could not be refreshed.',targets});if(Array.isArray(prior[c+'_records']))warnings.push({code:'USING_CACHE',message:'Previously saved '+c+' are being used.',targets});continue;
         }
         for(const row of outcome.value){const key=String(c==='notes'?row.id:row.book_hash),old=map.get(key);if(!old||stamp(row)>=stamp(old))map.set(key,row);}
         checkpoint[c+'_records']=[...map.values()];checkpoint[c+'_cursor']=Math.max(Number(prior[c+'_cursor']??0),...outcome.value.map(r=>c==='books'?ms(r.synced_at)||stamp(r):stamp(r)));
@@ -59,12 +60,12 @@ export async function createCloudSource(config:CloudConfig,credentials=new Crede
       const annotations:SourceRead['annotations']=[];
       for(const row of maps.notes.values()){
         const note=normalizeAnnotation({...row,createdAt:row.created_at,updatedAt:row.updated_at},scopedId('b',source_id,String(row.book_hash)),source_id);
-        if(!note){warnings.push({code:'ANNOTATION_UNSUPPORTED',message:'A cloud annotation type could not be interpreted.'});continue;}
+        if(!note){warnings.push({code:'ANNOTATION_UNSUPPORTED',message:'A cloud annotation type could not be interpreted.',book_id:scopedId('b',source_id,String(row.book_hash)),targets:['quotes','notes']});continue;}
         if(row.deleted_at)deleted_annotation_ids.push(note.id);else annotations.push(note);
       }
       const refreshed_at=outcomes.some(r=>r.status==='fulfilled')?new Date().toISOString():typeof prior.refreshed_at==='string'?prior.refreshed_at:null;
       if(refreshed_at===null)throw new DomainError('SOURCE_UNAVAILABLE','No cloud channel could be refreshed.',true);checkpoint.refreshed_at=refreshed_at;
-      return {source_id,kind:previous?'delta':'full',books,annotations,deleted_book_ids,deleted_annotation_ids,checkpoint,refreshed_at,coverage:{scope:'configured_source',completeness:warnings.length?'partial':'complete',known_books:books.length,covered_books:books.length},warnings,file_versions};
+      return {source_id,kind:previous?'delta':'full',books,annotations,deleted_book_ids,deleted_annotation_ids,checkpoint,refreshed_at,coverage:{scope:'configured_source',completeness:outcomes[0]?.status==='fulfilled'?'complete':'partial',known_books:books.length,covered_books:books.length},warnings,file_versions};
     },
     async resolveBookFile(book,options):Promise<FileResolution>{
       try{await account();options.signal.throwIfAborted();if(!['EPUB','PDF'].includes(book.format))throw new DomainError('UNSUPPORTED_CONTENT','Only EPUB and PDF content is supported.');

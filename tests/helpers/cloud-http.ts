@@ -7,7 +7,7 @@ export const userId='00000000-0000-4000-8000-000000000001';
 export const jwt=(label='initial')=>Buffer.from(JSON.stringify({alg:'HS256',typ:'JWT'})).toString('base64url')+'.'+Buffer.from(JSON.stringify({sub:userId,exp:Math.floor(Date.now()/1000)+3600,role:'authenticated',label})).toString('base64url')+'.fixture';
 export async function cloudFixture(){
   const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'readest-cloud-')));
-  const state={requests:[] as {method:string;url:string;authorization:string|undefined}[],timeout:false,notesError:false,malformed:false,authOnce:false,deny:false,renewals:0,downloads:0,signedExpired:false,largePage:false,deleted:false,oversized:false,interrupted:false,bookBytes:Buffer.from('fixture book bytes') as Buffer};
+  const state={requests:[] as {method:string;url:string;authorization:string|undefined}[],empty:false,timeout:false,notesError:false,malformed:false,authOnce:false,deny:false,renewals:0,downloads:0,signedExpired:false,largePage:false,deleted:false,oversized:false,interrupted:false,bookBytes:Buffer.from('fixture book bytes') as Buffer};
   let origin='';
   const server=http.createServer(async(req,res)=>{
     const url=new URL(req.url!,origin);state.requests.push({method:req.method!,url:req.url!,authorization:req.headers.authorization});
@@ -26,6 +26,7 @@ export async function cloudFixture(){
       if(state.oversized)res.setHeader('content-length',String(40*1024*1024));
       const type=url.searchParams.get('type');if(state.notesError&&type==='notes')return send({error:'unavailable'},500);
       if(state.malformed)return send({unexpected:true});
+      if(state.empty)return send({books:[],configs:[],notes:[]});
       const book={user_id:userId,book_hash:keys.a,title:'Cloud decisions',author:'A',format:'EPUB',tags:['research'],group_id:null,group_name:null,reading_status:'reading',progress:[1,5],created_at:'2026-01-01T00:00:00Z',updated_at:'2026-01-02T00:00:00Z',synced_at:'2026-01-03T00:00:00Z',deleted_at:state.deleted?'2026-01-04T00:00:00Z':null};
       const books=state.largePage&&Number(url.searchParams.get('since'))===0?Array.from({length:1001},(_,i)=>({...book,book_hash:i.toString(16).padStart(32,'0')})):[book];
       const since=Number(url.searchParams.get('since'));const current=Date.parse(book.synced_at);

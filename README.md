@@ -21,7 +21,14 @@ To use keyword search without the optional local embedding runtime, install with
 
 ## Configure
 
-Save one of these as `~/.config/readest-mcp/config.json` (create the directory first).
+Create a private configuration directory, then save one of these as `~/.config/readest-mcp/config.json`. On macOS/Linux:
+
+```sh
+mkdir -p ~/.config/readest-mcp
+chmod 700 ~/.config/readest-mcp
+```
+
+On Windows, create the same directory under your user profile with access limited to your account.
 
 **Readest Cloud**
 
@@ -35,7 +42,7 @@ Sign in from your own terminal:
 node dist/cli.js login
 ```
 
-The password prompt is hidden. Only a renewable account session is stored, in a private local file; passwords are not stored. Social-only accounts may need a password set in Readest first. This uses Readest's published sync interface and the account flow documented for KOReader, rather than a separate developer API. Cloud storage access still depends on what is uploaded and accessible to your account.
+The password prompt is hidden. Only a renewable account session is stored, in a private local file; passwords are not stored. Read-only describes this server's allowed operations; the credential is an ordinary Readest account session. Social-only accounts may need a password set in Readest first. This uses Readest's published sync interface and the account flow documented for KOReader, rather than a separate developer API. Cloud storage access still depends on what is uploaded and accessible to your account.
 
 **Local library, including Readest-managed Drive sync**
 

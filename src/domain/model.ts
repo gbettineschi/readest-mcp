@@ -18,7 +18,7 @@ export const EvidenceSchema=z.object({passage_id:z.string(),book_id:z.string(),r
 export type Evidence=z.infer<typeof EvidenceSchema>;
 export interface Passage extends Evidence {structure_id:string;order:number;}
 export interface ExtractedBook {revision:string;structure:StructureItem[];passages:Passage[];warnings:Warning[];pages:{page:number;status:'text'|'empty'|'failed'}[];}
-export interface Warning {code:string;message:string;}
+export interface Warning {code:string;message:string;book_id?:string;targets?:string[];}
 export interface Page<T> {items:T[];next_cursor:string|null;}
 export interface ModelManifest {id:string;revision:string;dtype:string;dimensions:number;chunk_version:number;}
 export interface EmbeddedChunk {passage_id:string;start:number;end:number;vector:Float32Array;}

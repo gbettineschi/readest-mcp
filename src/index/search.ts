@@ -9,7 +9,7 @@ export function keywordQuery(query:string):string{
   return tokens.map(t=>'"'+t.replace(/"/g,'""')+'"').join(' AND ');
 }
 export function cursorKey(value:unknown):string{return hash(JSON.stringify(value));}
-export function readCursor(cursor:string|null,generation:number,key:string):number{
-  if(cursor===null)return 0;try{const data=JSON.parse(Buffer.from(cursor,'base64url').toString('utf8'));if(data.g!==generation||data.q!==key)throw new Error();if(!Number.isSafeInteger(data.o)||data.o<0||data.o>1000000)throw new Error();return data.o;}catch{throw new DomainError('STALE_CURSOR','Cursor is invalid or belongs to an earlier index generation. Start the listing again.');}
+export function readCursor(cursor:string|null,generation:number,key:string,maxOffset=1000000):number{
+  if(cursor===null)return 0;try{const data=JSON.parse(Buffer.from(cursor,'base64url').toString('utf8'));if(data.g!==generation||data.q!==key)throw new Error();if(!Number.isSafeInteger(data.o)||data.o<0||data.o>maxOffset)throw new Error();return data.o;}catch{throw new DomainError('STALE_CURSOR','Cursor is invalid or belongs to an earlier index generation. Start the listing again.');}
 }
 export const writeCursor=(generation:number,key:string,offset:number)=>Buffer.from(JSON.stringify({g:generation,q:key,o:offset})).toString('base64url');
