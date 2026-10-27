@@ -1,0 +1,15 @@
+name: Bug report
+description: Report a reproducible problem without personal data.
+body:
+  - type: textarea
+    attributes:
+      label: What happened?
+      description: Include expected behavior and a small reproduction using synthetic data.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Environment
+      description: OS, Node version, Readest version, local/cloud source, error codes. Do not paste tokens, signed URLs, personal books or notes.
+    validations:
+      required: true
