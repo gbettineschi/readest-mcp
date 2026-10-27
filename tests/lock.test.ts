@@ -22,5 +22,5 @@ it('cleans its staged owner if initialization fails after creating the file',asy
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'readest-lock-'));directories.push(dir);const lock=path.join(dir,'refresh.lock'),write=fs.writeFile.bind(fs),open=fs.open.bind(fs),failure=Object.assign(new Error('disk full'),{code:'ENOSPC'});
  vi.spyOn(fs,'writeFile').mockImplementation(async(...args:Parameters<typeof fs.writeFile>)=>{if(String(args[0]).endsWith('.owner')){await write(args[0],'',args[2]);throw failure;}return write(...args);});
  vi.spyOn(fs,'open').mockImplementation(async(...args:Parameters<typeof fs.open>)=>{const handle=await open(...args);if(String(args[0]).endsWith('.owner'))handle.writeFile=async()=>{throw failure;};return handle;});
- await expect(withFileLock(lock,async()=>42)).rejects.toMatchObject({code:'ENOSPC'});expect(await fs.readdir(dir)).toEqual([]);
+ await expect(withFileLock(lock,async()=>42)).rejects.toMatchObject({code:'ENOSPC'});expect(await fs.readdir(dir)).toEqual(['refresh.lock.sqlite']);if(process.platform!=='win32')expect((await fs.stat(lock+'.sqlite')).mode&0o777).toBe(0o600);
 });

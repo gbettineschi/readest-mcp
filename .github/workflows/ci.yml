@@ -11,6 +11,10 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      READEST_TEST_MODEL: '1'
+      READEST_TEST_OCR: '1'
+      READEST_TESSERACT: ${{ matrix.os == 'windows-latest' && 'C:\Program Files\Tesseract-OCR\tesseract.exe' || 'tesseract' }}
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.1.0
@@ -18,7 +22,25 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Install OCR on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-eng
+      - name: Install OCR on macOS
+        if: runner.os == 'macOS'
+        run: brew list tesseract >/dev/null 2>&1 || brew install tesseract
+      - name: Install OCR on Windows
+        if: runner.os == 'Windows'
+        run: |
+          if (!(Test-Path $env:READEST_TESSERACT)) { choco install tesseract -y --no-progress }
+          & $env:READEST_TESSERACT --version
       - run: npm run typecheck
+      - name: Fetch checksum-verified local model for real inference tests
+        env:
+          READEST_CONFIG: ${{ runner.temp }}/readest-ci/config.json
+          READEST_MODEL_DIR: ${{ runner.temp }}/readest-models
+        run: node .github/scripts/prepare-optional-runtime.mjs
       - run: npm test
+        env:
+          READEST_MODEL_DIR: ${{ runner.temp }}/readest-models
       - run: npm run build
       - run: npm pack --dry-run
