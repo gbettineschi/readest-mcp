@@ -18,8 +18,8 @@ Sources: [sync documentation](https://www.readest.com/docs/sync), [sync server](
 - Production dependency audit reported no known vulnerabilities at the check time. Dependency licenses were inspected; the model is downloaded separately.
 - Readest 0.12.16 was rechecked on this Mac. No saved library was found in the bounded standard local paths. No live local library or Drive sync was tested.
 - Separate cloud sign-in, authenticated catalogue reads through the installed MCP, and forced session renewal succeeded. The real account returned zero books. No personal EPUB/PDF, annotation, storage download or reference round trip could be tested against this empty catalogue. The private session file remained 0600; no browser/app token was extracted and no password was stored.
-- A fresh local Codex app-server client discovered all six tools from the installed package/configuration. Prior client settings were preserved. Current-chat reconnection has not been demonstrated; the running app's optional control socket was unavailable. Discovery is separate from a successful authenticated read.
-- CI is configured for Node 24 on macOS, Linux and Windows; workflow presence alone is not evidence of passing those hosts.
+- A fresh local Codex app-server client discovered all six tools and successfully called library_status against the authorized cloud account, using an ephemeral diagnostic session rather than a saved chat. Prior client settings were preserved. Current-chat reconnection has not been demonstrated; the running app's optional control socket was unavailable, so an existing chat may need reopening.
+- [GitHub CI passed](https://github.com/gbettineschi/readest-mcp/actions/runs/40498278352) on Node 24/macOS, Linux and Windows for code commit 044c6c3, including typecheck, all 74 default fixture/package tests, build and package checks. Real-model and live-account tests remain opt-in and were run separately on this Mac. Windows PDF resource paths and npm spawning were corrected from actual runner failures before this passing run.
 
 ## Local semantic retrieval probe
 
