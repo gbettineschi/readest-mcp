@@ -7,13 +7,15 @@ import {localLibrary,keys} from './helpers/local-library.js';
 import {epub} from './helpers/books.js';
 import {stdioClient} from './helpers/stdio-client.js';
 const exec=promisify(execFile);
+const npmCli=process.env.npm_execpath;
 it('packs only distributable files and runs a production-only isolated install through an exact-reference round trip',async()=>{
  const f=await localLibrary();try{
-  const packed=JSON.parse((await exec('npm',['pack','--json','--pack-destination',f.root])).stdout)[0];const files=packed.files.map((f:{path:string})=>f.path);
+  if(!npmCli)throw new Error('Run the clean-install check through npm test.');
+  const packed=JSON.parse((await exec(process.execPath,[npmCli,'pack','--json','--pack-destination',f.root])).stdout)[0];const files=packed.files.map((f:{path:string})=>f.path);
   for(const required of ['README.md','LICENSE','THIRD_PARTY_NOTICES.md','dist/cli.js'])expect(files).toContain(required);
   expect(files.some((f:string)=>/credentials|library\.json|index\.sqlite|model_quantized|node_modules|\.superpowers|^tests\//.test(f))).toBe(false);
   const install=path.join(f.root,'install');await fs.mkdir(install);await fs.writeFile(path.join(install,'package.json'),' {"private":true}');
-  await exec('npm',['install','--ignore-scripts','--omit=dev','--omit=optional','--no-audit','--no-fund',path.join(f.root,packed.filename)],{cwd:install,timeout:120000});
+  await exec(process.execPath,[npmCli,'install','--ignore-scripts','--omit=dev','--omit=optional','--no-audit','--no-fund',path.join(f.root,packed.filename)],{cwd:install,timeout:120000});
   const entry=path.join(install,'node_modules','readest-mcp','dist','cli.js');if(process.platform!=='win32')expect((await fs.stat(entry)).mode&0o111).not.toBe(0);
   for(const name of files){if(!/\.(js|json|md)$/.test(name))continue;const content=await fs.readFile(path.join(install,'node_modules','readest-mcp',name),'utf8');expect(content).not.toMatch(/\/Users\/[^/]+\//);}
   await fs.writeFile(path.join(f.library,keys.a,'book.epub'),await epub());const config=path.join(f.root,'config.json');await fs.writeFile(config,JSON.stringify(f.config));const c=await stdioClient(config,entry);

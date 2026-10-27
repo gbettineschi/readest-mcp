@@ -5,7 +5,8 @@ import {blankLocation,scopedId,type Book,type ExtractedBook,type Passage,type St
 import {DomainError} from '../domain/result.js';
 const require=createRequire(import.meta.url);
 export async function extractPdf(book:Book,bytes:Buffer,revision:string):Promise<ExtractedBook>{
-  const fonts=path.join(path.dirname(require.resolve('pdfjs-dist/package.json')),'standard_fonts')+path.sep;
+  // PDF.js requires a forward trailing slash even for Node filesystem paths on Windows.
+  const fonts=path.join(path.dirname(require.resolve('pdfjs-dist/package.json')),'standard_fonts').replaceAll('\\','/')+'/';
   const task=getDocument({data:new Uint8Array(bytes),verbosity:0,useSystemFonts:false,disableFontFace:true,useWorkerFetch:false,standardFontDataUrl:fonts,stopAtErrors:true});
   let doc;try{doc=await task.promise;}catch(error){await task.destroy();if((error as Error).name==='PasswordException')throw new DomainError('PASSWORD_PROTECTED','Password-protected PDFs are not supported.');throw new DomainError('EXTRACTION_FAILED','PDF could not be parsed.');}
   const structure:StructureItem[]=[],passages:Passage[]=[],pages:ExtractedBook['pages']=[];const labels=await doc.getPageLabels().catch(()=>null);
