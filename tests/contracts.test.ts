@@ -57,4 +57,12 @@ describe('source-independent public contract',()=>{
   it('can create an FTS5 index on the supported runtime',()=>{
     const db=new DatabaseSync(':memory:');try{db.exec('CREATE VIRTUAL TABLE passages USING fts5(text)');db.prepare('INSERT INTO passages(text) VALUES (?)').run('uncertainty');expect(db.prepare('SELECT text FROM passages WHERE passages MATCH ?').get('uncertainty')).toEqual({text:'uncertainty'});}finally{db.close();}
   });
+  it('serializes only canonical fields and keeps output-limit failures in the typed envelope',async()=>{
+    const handlers=Object.fromEntries(toolNames.map(name=>[name,async()=>({...empty('local'),private_debug:'must not escape'})])) as unknown as ToolHandlers;
+    const server=createMcpServer(handlers),client=new Client({name:'boundary',version:'1'}),[a,b]=InMemoryTransport.createLinkedPair();await server.connect(a);await client.connect(b);
+    try{const output=await client.callTool({name:'list_books',arguments:{}});expect(JSON.stringify(output)).not.toContain('private_debug');
+      handlers.list_books=async()=>({...empty('local'),warnings:[{code:'BIG',message:'x'.repeat(70_000)}]});
+      const tooBig=await client.callTool({name:'list_books',arguments:{}});expect(tooBig.isError).toBe(true);expect(outputSchemas.list_books.parse(tooBig.structuredContent).error?.code).toBe('LIMIT_EXCEEDED');
+    }finally{await client.close();await server.close();}
+  });
 });
