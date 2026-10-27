@@ -45,6 +45,9 @@ it.each([
  [{created_after:'2026-10-27T13:30:00+02:00'},['n3','n5']],
  [{created_before:'2026-10-27T06:30:00-04:00'},['n1']],
  [{created_after:'2026-10-27T10:00:00Z',created_before:'2026-10-27T10:00:00.000Z'},['n1']],
+  [{created_after:'2026-10-27T10:00:00.0001Z'},['n2','n3','n5']],
+  [{created_after:'2026-10-27T12:00:00.0001+02:00'},['n2','n3','n5']],
+  [{created_after:'2026-10-27T10:00:00.0000Z'},['n1','n2','n3','n5']],
  [{types:['annotation','ink'],colors:['yellow'],created_after:'2026-10-27T11:00:00Z'},['n5']],
  [{colors:['absent']},[]]
 ] as const)('filters annotations by their actual type, color and creation instant: %j',async(filters,want)=>{

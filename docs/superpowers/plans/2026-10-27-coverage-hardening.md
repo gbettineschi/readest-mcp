@@ -22,20 +22,20 @@
 
 ### Task 1: Filters and annotation lifecycle
 Files: tests/filters.test.ts, tests/annotation-lifecycle.test.ts; src/index/store.ts only if a failure proves a defect.
-- [ ] Add table-driven literal expectations for every book/annotation filter, combinations, pagination, UTC-offset bounds and missing timestamps.
-- [ ] Run against existing code; retain observed failures, diagnose, then implement the smallest correction.
-- [ ] Add local/cloud lifecycle checks for changed/deleted annotation evidence and stale references.
-- [ ] Verify targeted tests and full suite, including live/model/OCR checks.
+- [x] Add table-driven literal expectations for every book/annotation filter, combinations, pagination, UTC-offset bounds and missing timestamps.
+- [x] Run against existing code; retain observed failures, diagnose, then implement the smallest correction.
+- [x] Add local/cloud lifecycle checks for changed/deleted annotation evidence and stale references.
+- [x] Verify targeted tests and full suite, including live/model/OCR checks.
 
 ### Task 2: Live account and local acceptance
 Files: private diagnostics only, plus a synthetic EPUB generated outside Git.
 - [ ] Import the generated book using stock Readest; create a real highlight and personal note, sync, query via MCP, edit and remove only generated annotations.
 - [ ] Exercise local mode against the actual library with an isolated cache; check source files unchanged during passive reads.
-- [ ] Exercise bounded model/OCR and larger synthetic library cases; record limits and avoid calling them broad quality benchmarks.
+- [x] Exercise bounded model/OCR and larger synthetic library cases; record limits and avoid calling them broad quality benchmarks.
 
 ### Task 3: Recovery, review and delivery
 Files: tests/process-recovery.test.ts; docs/compatibility.md; any production fix only with an observed failing regression.
-- [ ] Use child processes to interrupt actual locks/cache writes and verify recovery, exclusion and readable snapshots.
+- [x] Use child processes to interrupt actual locks/cache writes and verify recovery, exclusion and readable snapshots.
 - [ ] Run full tests/typecheck/package install and current-client smoke checks appropriate to changes.
 - [ ] Obtain independent review, resolve actionable findings, open a PR and run CI on macOS/Linux/Windows.
 - [ ] Update verification evidence; integrate/install fixes within owner-authorized scope. Record anything requiring an essential login/manual step.
