@@ -17,7 +17,7 @@ npm ci
 npm run build
 ```
 
-To use keyword search without the optional local embedding runtime, install with `npm ci --omit=optional`. No npm release or binary installer is published yet.
+To use keyword search without the optional local embedding runtime, install with `npm ci --omit=optional`. [GitHub releases](https://github.com/gbettineschi/readest-mcp/releases) also provide a compiled npm package (`.tgz`) and SHA-256 checksums. Install a downloaded package with `npm install ./readest-mcp-0.1.0.tgz`, then use `npx readest-mcp` in that directory. Node 24 and runtime dependencies are still required; model files and Tesseract are installed separately. No npm registry package or standalone binary installer is published.
 
 ## Configure
 
