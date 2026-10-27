@@ -7,7 +7,7 @@ export interface RefreshCoordinator {metadata(signal:AbortSignal):Promise<Refres
 export function createRefreshCoordinator(deps:{source:LibrarySource;store:IndexStore;extractor:DocumentExtractor;embedder?:Embedder|null}):RefreshCoordinator{
   const {source,store,extractor}=deps;let pending:Promise<RefreshReport>|null=null;
   const asError=(error:unknown)=>error instanceof DomainError?error:new DomainError('SOURCE_UNAVAILABLE','Source refresh could not be completed.',true);
-  async function vectors(book_id:string,signal:AbortSignal){if(deps.embedder&&!store.hasEmbeddings(book_id,deps.embedder.manifest)){const chunks=await embedPassages(deps.embedder,store.evidenceForBook(book_id),signal);signal.throwIfAborted();store.replaceEmbeddings(book_id,deps.embedder.manifest,chunks);}}
+  async function vectors(book_id:string,signal:AbortSignal){if(deps.embedder){store.prepareSemanticEvidence(book_id);if(!store.hasEmbeddings(book_id,deps.embedder.manifest)){const chunks=await embedPassages(deps.embedder,store.semanticEvidenceForBook(book_id),signal);signal.throwIfAborted();store.replaceEmbeddings(book_id,deps.embedder.manifest,chunks);}}}
   async function metadata(signal:AbortSignal,rebuild=false):Promise<RefreshReport>{
     if(extractor.cacheKey)store.reconcileExtractionProfiles(extractor.cacheKey);
     try{const read=await source.readSnapshot(rebuild?null:store.getCheckpoint(),signal);signal.throwIfAborted();store.applySourceRead(read);if(extractor.cacheKey)store.reconcileExtractionProfiles(extractor.cacheKey);return {refreshed_at:read.refreshed_at,indexed:0,warnings:store.warnings()};}

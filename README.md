@@ -103,7 +103,7 @@ node dist/cli.js models fetch
 node dist/cli.js refresh --content available
 ```
 
-This explicitly downloads about 135 MB of pinned, checksum-verified [multilingual MiniLM](https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2) model files. Inference runs locally on CPU; book text is not uploaded to an embedding service. Passages are split within the model's 128-token budget with source offsets preserved; keep queries concise. Hybrid combines keyword and vector ranks. If semantics is unavailable, semantic requests fail clearly and hybrid reports a keyword fallback. After a model update, run `models fetch` and `refresh` again; old vectors are isolated by model identity.
+This explicitly downloads about 135 MB of pinned, checksum-verified [multilingual MiniLM](https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2) model files. Inference runs locally on CPU; book text is not uploaded to an embedding service. For semantics, adjacent EPUB paragraphs in the same section form continuous documents, so headings have surrounding context. These are split within the model's 128-token budget; keep queries concise. Search returns a retrievable reference to the matching window with source offsets. Original paragraphs remain available to keyword search and reading; PDF pages and annotations stay separate. Hybrid fuses the two channels at the section identity. If semantics is unavailable, semantic requests fail clearly and hybrid reports a keyword fallback. After a model/index update, run `models fetch` and `refresh` again; old vectors are isolated by manifest identity.
 
 ## Optional PDF OCR
 

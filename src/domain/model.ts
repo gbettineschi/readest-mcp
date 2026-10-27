@@ -16,7 +16,7 @@ export const StructureSchema=z.object({id:z.string(),book_id:z.string(),revision
 export type StructureItem=z.infer<typeof StructureSchema>;
 export const EvidenceSchema=z.object({passage_id:z.string(),book_id:z.string(),revision:z.string(),title:z.string(),author:z.string(),source_kind:z.enum(['book_text','quote','note']),text:z.string(),location:LocationSchema,text_origin:z.literal('ocr').optional()});
 export type Evidence=z.infer<typeof EvidenceSchema>;
-export interface Passage extends Evidence {structure_id:string;order:number;}
+export interface Passage extends Evidence {structure_id:string;order:number;retrieval_unit?:true;}
 export interface ExtractedBook {revision:string;extraction_key?:string;structure:StructureItem[];passages:Passage[];warnings:Warning[];pages:{page:number;status:'text'|'ocr'|'blank'|'empty'|'failed'}[];}
 export interface Warning {code:string;message:string;book_id?:string;targets?:string[];}
 export interface Page<T> {items:T[];next_cursor:string|null;}

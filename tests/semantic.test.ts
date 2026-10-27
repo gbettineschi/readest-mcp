@@ -72,3 +72,26 @@ it('indexes vectors only during explicit refresh and includes annotation-only ev
  await refresh.refresh({content:'available',rebuild:false},new AbortController().signal);expect(calls).toBe(3);
  expect((await f.store.search(query('semantic'),{manifest,vector:Float32Array.of(1,0)})).items).toHaveLength(3);
 });
+it('indexes continuous section context semantically while preserving original keyword passages',async()=>{
+ const f=await fixture(),parts=['A heading','A useful paragraph with substantive details.'],passages=parts.map((text,i)=>({...f.passages[i]!,text,order:i,location:{...blankLocation('epub'),href:'one.xhtml',spine_index:0,paragraph:i+1,start:i?10:0,end:i?10+text.length:text.length}}));
+ f.store.replaceContent('b',{revision:'r',structure:[],passages,warnings:[],pages:[]});
+ const embedder={manifest,countTokens:async(s:string)=>s.length,embed:async(texts:string[])=>texts.map(()=>Float32Array.of(1,0))},source={mode:'local' as const,source_id:'one',readSnapshot:async()=>f.read,resolveBookFile:async()=>({status:'unavailable' as const,code:'CONTENT_UNAVAILABLE',message:'Cached test content.'})};
+ await createRefreshCoordinator({source,store:f.store,extractor:{extract:async()=>{throw new Error('Unused');}},embedder}).refresh({content:'available',rebuild:false},new AbortController().signal);
+ const result=await f.store.search(query('semantic'),{manifest,vector:Float32Array.of(1,0)});
+ expect(result.items).toHaveLength(1);expect(result.items[0]?.evidence.text).toBe('A heading\nA useful paragraph with substantive details.');
+ expect(result.items[0]?.evidence.location).toMatchObject({start:0,end:54,paragraph:null,href:'one.xhtml'});
+ expect(f.store.getPassage('p0')?.text).toBe('A heading');expect(f.store.getPassage('p1')?.text).toBe(parts[1]);
+ expect((await f.store.search(query('keyword',{query:'heading'}),null)).items.map(h=>h.evidence.passage_id)).toEqual(['p0']);
+ const ref=result.items[0]!.evidence;expect(f.store.getPassage(ref.passage_id)?.text).toBe(ref.text);
+ const hybrid=await f.store.search(query('hybrid',{query:'heading'}),{manifest,vector:Float32Array.of(1,0)});expect(hybrid.items).toHaveLength(1);expect(hybrid.items[0]?.evidence.passage_id).toBe(ref.passage_id);expect(hybrid.items[0]?.score).toBeCloseTo(2/61);
+ expect(f.store.semanticCoverage(manifest,['book_text'])).toMatchObject({covered_books:1,completeness:'complete'});
+ f.store.rebuildSearch();expect((await f.store.search(query('keyword',{query:'heading'}),null)).items.map(h=>h.evidence.passage_id)).toEqual(['p0']);
+});
+it('resolves semantic windows at their actual matching source range and expires them with the source',async()=>{
+ const f=await fixture(),texts=['Heading',('ordinary '.repeat(100))+'late needle '+('ending '.repeat(100))],passages=texts.map((text,i)=>({...f.passages[i]!,text,order:i,location:{...blankLocation('epub'),href:'one.xhtml',spine_index:0,paragraph:i+1,start:i?8:0,end:i?8+text.length:text.length}}));f.store.replaceContent('b',{revision:'r',structure:[],passages,warnings:[],pages:[]});
+ const embedder={manifest,countTokens:async(s:string)=>s.length,embed:async(texts:string[])=>texts.map(t=>t.includes('needle')?Float32Array.of(1,0):Float32Array.of(0,1))},source={mode:'local' as const,source_id:'one',readSnapshot:async()=>f.read,resolveBookFile:async()=>({status:'unavailable' as const,code:'CONTENT_UNAVAILABLE',message:'Cached test content.'})};await createRefreshCoordinator({source,store:f.store,extractor:{extract:async()=>{throw new Error('Unused');}},embedder}).refresh({content:'available',rebuild:false},new AbortController().signal);
+ const result=await f.store.search(query('semantic'),{manifest,vector:Float32Array.of(1,0)}),hit=result.items[0]!.evidence,read=f.store.getPassage(hit.passage_id)!;
+ expect(read.text.length).toBeLessThanOrEqual(1600);expect(read.text).toContain('needle');expect(read.location.start).toBeGreaterThan(800);expect(read.text).toContain(hit.text);
+ expect(f.store.getPassage(hit.passage_id+'garbage')).toBeNull();
+ f.store.replaceContent('b',{revision:'new',structure:[],passages:[],warnings:[],pages:[]});expect(f.store.getPassage(hit.passage_id)).toBeNull();
+});

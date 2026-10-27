@@ -47,3 +47,11 @@ Files: src/index/{embeddings,model}.ts/json as determined by measured cause; tes
 - [ ] Update concise setup/compatibility notes and third-party notices as needed.
 - [ ] Review changes, fix important findings, verify installed package and all six tools.
 - [ ] Commit and push the verified repair to the authorized repo; no tag or release.
+
+### Task 4: Corpus-driven semantic representation
+
+- [ ] RED regression: heading plus adjacent body becomes one semantic hit while original keyword passage IDs remain unchanged, including after rebuilding FTS.
+- [ ] Add pure section-unit construction and persist derived units outside FTS; preserve PDF/annotation/resource/section/offset boundaries and singleton IDs.
+- [ ] Use the same expected unit set for embedding readiness and target-specific coverage; invalidate paragraph vectors through manifest chunk version.
+- [ ] Test exact source ranges, original references, derived references, removed units and Unicode boundaries; run whole suite and typecheck.
+- [ ] Fresh review of only this new unit layer, then full private corpus reindex and all six paired relevance checks before accepting it.
