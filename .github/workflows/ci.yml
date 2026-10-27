@@ -14,8 +14,6 @@ jobs:
     env:
       READEST_TEST_MODEL: '1'
       READEST_TEST_OCR: '1'
-      READEST_CONFIG: ${{ runner.temp }}/readest-ci/config.json
-      READEST_MODEL_DIR: ${{ runner.temp }}/readest-models
       READEST_TESSERACT: ${{ matrix.os == 'windows-latest' && 'C:\Program Files\Tesseract-OCR\tesseract.exe' || 'tesseract' }}
     steps:
       - uses: actions/checkout@v7.0.1
@@ -37,7 +35,12 @@ jobs:
           & $env:READEST_TESSERACT --version
       - run: npm run typecheck
       - name: Fetch checksum-verified local model for real inference tests
+        env:
+          READEST_CONFIG: ${{ runner.temp }}/readest-ci/config.json
+          READEST_MODEL_DIR: ${{ runner.temp }}/readest-models
         run: node .github/scripts/prepare-optional-runtime.mjs
       - run: npm test
+        env:
+          READEST_MODEL_DIR: ${{ runner.temp }}/readest-models
       - run: npm run build
       - run: npm pack --dry-run
