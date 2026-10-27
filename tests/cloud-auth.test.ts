@@ -1,6 +1,6 @@
 import {afterEach,expect,it} from 'vitest';
 import fs from 'node:fs/promises';
-import {CredentialStore,createCloudAuth} from '../src/sources/cloud-auth.js';
+import {CredentialStore,createCloudAuth} from '../dist/sources/cloud-auth.js';
 import {cloudFixture,userId} from './helpers/cloud-http.js';
 const cleanups:(()=>Promise<void>)[]=[];afterEach(async()=>{await Promise.all(cleanups.splice(0).map(f=>f()));});
 it('stores a separate renewable session privately and never persists a password',async()=>{

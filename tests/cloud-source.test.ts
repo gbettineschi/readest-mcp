@@ -1,8 +1,8 @@
 import {afterEach,describe,expect,it} from 'vitest';
 import fs from 'node:fs/promises';
-import {createCloudSource} from '../src/sources/cloud.js';
+import {createCloudSource} from '../dist/sources/cloud.js';
 import {cloudFixture} from './helpers/cloud-http.js';
-import {loadConfig} from '../src/config.js';
+import {loadConfig} from '../dist/config.js';
 import path from 'node:path';
 const cleanups:(()=>Promise<void>)[]=[];afterEach(async()=>{await Promise.all(cleanups.splice(0).map(f=>f()));});
 async function fixture(){const f=await cloudFixture();cleanups.push(f.close);return f;}

@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/client';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { DatabaseSync } from 'node:sqlite';
-import { createMcpServer } from '../src/mcp/server.js';
-import { inputSchemas, outputSchemas, toolNames } from '../src/mcp/schemas.js';
-import { makeResult } from '../src/domain/result.js';
-import type { ToolHandlers } from '../src/mcp/schemas.js';
+import { createMcpServer } from '../dist/mcp/server.js';
+import { inputSchemas, outputSchemas, toolNames } from '../dist/mcp/schemas.js';
+import { makeResult } from '../dist/domain/result.js';
+import type { ToolHandlers } from '../dist/mcp/schemas.js';
 
 const meta = (source: 'local'|'cloud') => ({source,refreshed_at:null,from_cache:false,coverage:{scope:'configured_source' as const,completeness:'unknown' as const,known_books:null,covered_books:null}});
 const empty = (source: 'local'|'cloud') => ({data:{items:[],next_cursor:null},status:'ok' as const,warnings:[],error:null,meta:meta(source)});

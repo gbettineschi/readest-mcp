@@ -1,9 +1,9 @@
 import {afterEach,describe,expect,it,vi} from 'vitest';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { createLocalSource } from '../src/sources/local.js';
-import { loadConfig } from '../src/config.js';
-import { resolveAllowedPath } from '../src/security/paths.js';
+import { createLocalSource } from '../dist/sources/local.js';
+import { loadConfig } from '../dist/config.js';
+import { resolveAllowedPath } from '../dist/security/paths.js';
 import {localLibrary,keys} from './helpers/local-library.js';
 const signal=()=>new AbortController().signal;
 const cleanups:(()=>Promise<void>)[]=[];
