@@ -1,0 +1,6 @@
+{
+  "_source": "https://raw.githubusercontent.com/readest/readest/44c90152f6b04e74f71245bb3642d9a7e03042ed/apps/readest-app/.env",
+  "api_base": "https://web.readest.com/api",
+  "auth_url": "https://vbsyxfusjjqdxkjqlysc.supabase.co",
+  "anon_key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZic3l4ZnVzampxZHhranFseXNjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzQxMjM2NzEsImV4cCI6MjA0OTY5OTY3MX0.3U5Uqaou_1SgrVe1eo9rApc0uKjqhpQdUXhvwUHmUfg"
+}

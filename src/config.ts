@@ -4,6 +4,7 @@ import os from 'node:os';
 import * as z from 'zod/v4';
 import {DomainError} from './domain/result.js';
 import {within,plannedRealPath} from './security/paths.js';
+import cloudDefaults from './sources/cloud-defaults.json' with {type:'json'};
 export interface CacheConfig {cache_dir:string;}
 export interface EmbeddingConfig {enabled:boolean;model_dir:string;}
 interface BaseConfig extends CacheConfig {embeddings:EmbeddingConfig;}
@@ -13,7 +14,7 @@ export type Config=LocalConfig|CloudConfig;
 const base={cache_dir:z.string().optional(),embeddings:z.object({enabled:z.boolean().default(false),model_dir:z.string().optional()}).optional()};
 const schema=z.discriminatedUnion('source',[
   z.object({source:z.literal('local'),library_dir:z.string().optional(),content_roots:z.array(z.string()).default([]),...base}).strict(),
-  z.object({source:z.literal('cloud'),api_base:z.url(),auth_url:z.url(),anon_key:z.string().min(1),credential_file:z.string(),...base}).strict()
+  z.object({source:z.literal('cloud'),api_base:z.url().default(cloudDefaults.api_base),auth_url:z.url().default(cloudDefaults.auth_url),anon_key:z.string().min(1).default(cloudDefaults.anon_key),credential_file:z.string().default(path.join(os.homedir(),'.config','readest-mcp','credentials.json')),...base}).strict()
 ]);
 const expand=(p:string,base:string)=>path.resolve(base,p==='~'?os.homedir():p.startsWith('~/')?path.join(os.homedir(),p.slice(2)):p);
 export function standardLibraryPaths(home=os.homedir(),platform=process.platform):string[]{
