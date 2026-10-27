@@ -52,6 +52,8 @@ The password prompt is hidden. Only a renewable account session is stored, in a 
 
 Use the directory containing `library.json`. Omit `library_dir` only if one saved library exists in a standard app location. For imported files stored elsewhere, add their parent directories as `content_roots`. The adapter reads saved files passively: download/sync missing books in Readest itself. It does not connect directly to Drive or launch Readest.
 
+**Verification note:** The local adapter has automated fixture tests, but has not yet been verified end to end with a real local Readest library, including one synced through Google Drive. macOS denied access to Readest's app data on the test machine. See the [verification record](docs/compatibility.md).
+
 Optional shared settings: `cache_dir` and `embeddings: {"enabled":true,"model_dir":"/absolute/path/to/models"}`. Relative paths resolve beside the configuration file; `~` is supported. Keep cache and model directories outside your source content roots. Defaults live under `~/.cache/readest-mcp`.
 
 ## Prepare and connect
