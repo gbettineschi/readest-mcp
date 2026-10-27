@@ -7,7 +7,7 @@ export const userId='00000000-0000-4000-8000-000000000001';
 export const jwt=(label='initial')=>Buffer.from(JSON.stringify({alg:'HS256',typ:'JWT'})).toString('base64url')+'.'+Buffer.from(JSON.stringify({sub:userId,exp:Math.floor(Date.now()/1000)+3600,role:'authenticated',label})).toString('base64url')+'.fixture';
 export async function cloudFixture(){
   const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'readest-cloud-')));
-  const state={requests:[] as {method:string;url:string;authorization:string|undefined}[],empty:false,timeout:false,notesError:false,malformed:false,authOnce:false,deny:false,renewals:0,downloads:0,signedExpired:false,largePage:false,deleted:false,oversized:false,interrupted:false,bookBytes:Buffer.from('fixture book bytes') as Buffer};
+  const state={requests:[] as {method:string;url:string;authorization:string|undefined}[],format:'EPUB' as 'EPUB'|'PDF',empty:false,timeout:false,notesError:false,malformed:false,authOnce:false,deny:false,renewals:0,downloads:0,signedExpired:false,largePage:false,deleted:false,oversized:false,interrupted:false,bookBytes:Buffer.from('fixture book bytes') as Buffer};
   let origin='';
   const server=http.createServer(async(req,res)=>{
     const url=new URL(req.url!,origin);state.requests.push({method:req.method!,url:req.url!,authorization:req.headers.authorization});
@@ -27,12 +27,12 @@ export async function cloudFixture(){
       const type=url.searchParams.get('type');if(state.notesError&&type==='notes')return send({error:'unavailable'},500);
       if(state.malformed)return send({unexpected:true});
       if(state.empty)return send({books:[],configs:[],notes:[]});
-      const book={user_id:userId,book_hash:keys.a,title:'Cloud decisions',author:'A',format:'EPUB',tags:['research'],group_id:null,group_name:null,reading_status:'reading',progress:[1,5],created_at:'2026-01-01T00:00:00Z',updated_at:'2026-01-02T00:00:00Z',synced_at:'2026-01-03T00:00:00Z',deleted_at:state.deleted?'2026-01-04T00:00:00Z':null};
+      const book={user_id:userId,book_hash:keys.a,title:'Cloud decisions',author:'A',format:state.format,tags:['research'],group_id:null,group_name:null,reading_status:'reading',progress:[1,5],created_at:'2026-01-01T00:00:00Z',updated_at:'2026-01-02T00:00:00Z',synced_at:'2026-01-03T00:00:00Z',deleted_at:state.deleted?'2026-01-04T00:00:00Z':null};
       const books=state.largePage&&Number(url.searchParams.get('since'))===0?Array.from({length:1001},(_,i)=>({...book,book_hash:i.toString(16).padStart(32,'0')})):[book];
       const since=Number(url.searchParams.get('since'));const current=Date.parse(book.synced_at);
       return send({books:type==='books'?(since>=current?[]:books):[],configs:type==='configs'?[{user_id:userId,book_hash:keys.a,progress:'[2,5]',location:'epubcfi(/6/2)',updated_at:'2026-01-02T00:00:00Z'}]:[],notes:type==='notes'?[{user_id:userId,book_hash:keys.a,id:'note-1',type:'annotation',cfi:'epubcfi(/6/2)',page:null,text:'An uncertain outcome',note:'my comment',style:'highlight',color:'yellow',created_at:'2026-01-01T00:00:00Z',updated_at:'2026-01-02T00:00:00Z',deleted_at:state.deleted?'2026-01-04T00:00:00Z':null}]:[],statBooks:[],statPages:[]});
     }
-    if(url.pathname==='/api/storage/download'){state.downloads++;return send({downloadUrl:origin+'/file.epub?signature=fixture'});}
+    if(url.pathname==='/api/storage/download'){state.downloads++;const expected=userId+'/Readest/Books/'+keys.a+'/'+keys.a+'.'+state.format.toLowerCase();if(url.searchParams.get('fileKey')!==expected)return send({error:'File not found'},404);return send({downloadUrl:origin+'/file.epub?signature=fixture'});}
     if(url.pathname==='/file.epub'){
       if(state.signedExpired){state.signedExpired=false;res.statusCode=403;return res.end('expired');}
       if(state.interrupted){res.setHeader('content-length','10000');res.write('partial');return res.destroy();}

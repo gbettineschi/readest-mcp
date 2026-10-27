@@ -8,6 +8,9 @@ const cleanups:(()=>Promise<void>)[]=[];afterEach(async()=>{await Promise.all(cl
 async function fixture(){const f=await cloudFixture();cleanups.push(f.close);return f;}
 const signal=()=>new AbortController().signal;
 describe('read-only cloud source',()=>{
+  it.each(['EPUB','PDF'] as const)('downloads %s using the published account-qualified book key',async format=>{
+    const f=await fixture();f.state.format=format;const s=await createCloudSource(f.config),snapshot=await s.readSnapshot(null,signal());const file=await s.resolveBookFile(snapshot.books[0]!,{acquire:true,signal:signal()});expect(file.status).toBe('available');if(file.status==='available'){expect(file.path.endsWith('.'+format.toLowerCase())).toBe(true);expect(await fs.readFile(file.path,'utf8')).toBe('fixture book bytes');}
+  });
   it('normalizes independent streams and leaves book acquisition on demand',async()=>{
     const f=await fixture(),s=await createCloudSource(f.config),r=await s.readSnapshot(null,signal());
     expect(r.books).toHaveLength(1);expect(r.books[0]).toMatchObject({title:'Cloud decisions',reading:{current:2,total:5},availability:{annotations:'available'}});

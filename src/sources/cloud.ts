@@ -73,7 +73,7 @@ export async function createCloudSource(config:CloudConfig,credentials=new Crede
         if(book.revision){const cached=path.join(dir,book.revision+ext);if(await fs.stat(cached).then(s=>s.isFile()).catch(()=>false))return {status:'available',path:cached,revision:book.revision};}
         if(!options.acquire)throw new DomainError('CONTENT_UNAVAILABLE','Book has not been downloaded into the MCP cache.');
         for(let attempt=0;attempt<2;attempt++){
-          const data=await client.get('/storage/download',{fileKey:book.source_key+'/'+book.source_key+ext},options.signal);
+          const data=await client.get('/storage/download',{fileKey:user+'/Readest/Books/'+book.source_key+'/'+book.source_key+ext},options.signal);
           if(typeof data.downloadUrl!=='string')throw new DomainError('CONTENT_UNAVAILABLE','No uploaded book file is available in Readest Cloud.');
           let bytes:Buffer;try{bytes=await client.download(data.downloadUrl,options.signal);}catch(error){if(attempt===0&&error instanceof DomainError&&error.code==='SIGNED_URL_EXPIRED')continue;throw error;}
           const revision=hash(bytes);await fs.mkdir(dir,{recursive:true,mode:0o700});const target=path.join(dir,revision+ext),temp=target+'.'+randomUUID()+'.part';await fs.writeFile(temp,bytes,{mode:0o600,flag:'wx'});await fs.rename(temp,target);return {status:'available',path:target,revision};
